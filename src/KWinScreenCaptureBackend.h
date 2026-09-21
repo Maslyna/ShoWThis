@@ -1,0 +1,32 @@
+#ifndef KWINSCREENCAPTUREBACKEND_H
+#define KWINSCREENCAPTUREBACKEND_H
+
+#include <QObject>
+#include <QSocketNotifier>
+
+#include "./AScreenCaptureBackend.h"
+
+class QDBusPendingCallWatcher;
+
+class KWinScreenCaptureBackend : public AScreenCaptureBackend
+{
+    Q_OBJECT
+public:
+    explicit KWinScreenCaptureBackend(QObject *parent = nullptr);
+    ~KWinScreenCaptureBackend() override;
+
+    void capture() override;
+
+private:
+    void onCallFinished(QDBusPendingCallWatcher *watcher);
+    void onPipeReadyRead();
+    void reset();
+    void finishWithFailure(const QString &reason);
+
+    QSocketNotifier *m_notifier = nullptr;
+    QByteArray m_buffer;
+    int m_width = 0, m_height = 0, m_stride = 0, m_format = 0;
+    int m_pipe_read_fd = -1;
+};
+
+#endif // KWINSCREENCAPTUREBACKEND_H
