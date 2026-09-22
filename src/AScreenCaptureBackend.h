@@ -15,7 +15,7 @@ public:
 
 signals:
     void captured(const QImage &image);
-    void captureFailed(const QString &reason);
+    void capture_failed(const QString &reason);
 };
 
 #endif // ASCREENCAPTUREBACKEND_H

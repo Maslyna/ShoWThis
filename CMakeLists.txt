@@ -15,7 +15,7 @@ qt_add_executable(ShoWThis
     src/AScreenCaptureBackend.h src/AScreenCaptureBackend.cpp
     src/KWinScreenCaptureBackend.h src/KWinScreenCaptureBackend.cpp
     src/GlobalShortcutPortal.h src/GlobalShortcutPortal.cpp
-    src/ShoWThisConstants.h src/ShoWThisConstants.cpp
+    src/ShoWThisConstants.h 
 )
 
 target_link_libraries(ShoWThis

@@ -18,10 +18,10 @@ public:
     void capture() override;
 
 private:
-    void onCallFinished(QDBusPendingCallWatcher *watcher);
-    void onPipeReadyRead();
+    void on_call_finished(QDBusPendingCallWatcher *watcher);
+    void on_pipe_ready_read();
     void reset();
-    void finishWithFailure(const QString &reason);
+    void finish_with_failure(const QString &reason);
 
     QSocketNotifier *m_notifier = nullptr;
     QByteArray m_buffer;

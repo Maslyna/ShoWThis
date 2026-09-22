@@ -1,0 +1,80 @@
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++20
+
+# --- Layout ---
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+NamespaceIndentation: None
+IndentCaseLabels: false
+Cpp11BracedListStyle: true
+FixNamespaceComments: true
+
+# --- Braces ---
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: false  
+  AfterClass: false
+  AfterStruct: false
+  AfterEnum: false
+  AfterNamespace: false
+  AfterUnion: false
+  BeforeElse: false
+  BeforeCatch: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+
+# --- Alignment ---
+AlignAfterOpenBracket: Align 
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+  PadOperators: true
+AlignConsecutiveDeclarations: false
+AlignTrailingComments: true
+AlignEscapedNewlines: Left
+AlignOperands: Align
+
+# --- Short blocks ---
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+
+# --- Arguments / parameters ---
+BinPackArguments: false
+BinPackParameters: false
+
+# --- Pointers & references ---
+PointerAlignment: Right 
+ReferenceAlignment: Right 
+DerivePointerAlignment: false
+
+# --- Spacing ---
+SpaceBeforeParens: ControlStatements
+SpacesInParentheses: false
+SpacesInAngles: false
+SpaceAfterTemplateKeyword: true
+SpacesBeforeTrailingComments: 2
+
+# --- Includes ---
+IncludeBlocks: Regroup
+SortIncludes: true
+IncludeCategories:
+  - Regex: '^<Q.*>'          # Qt headers
+    Priority: 2
+  - Regex: '^<.*>'            # system / std headers
+    Priority: 1
+  - Regex: '.*'                # project headers
+    Priority: 3
+
+# --- Penalties (fine-tune wrap willingness) ---
+PenaltyBreakAssignment: 2
+PenaltyExcessCharacter: 4
+ReflowComments: true
