@@ -1,10 +1,20 @@
 cmake_minimum_required(VERSION 3.19)
 project(ShoWThis LANGUAGES CXX)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# ---- External libs ---
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets DBus)
 find_package(LayerShellQt REQUIRED)
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(TESSERACT REQUIRED IMPORTED_TARGET tesseract)
+pkg_check_modules(LEPTONICA REQUIRED IMPORTED_TARGET lept)
+
 
 qt_standard_project_setup()
 
@@ -15,7 +25,7 @@ qt_add_executable(ShoWThis
     src/AScreenCaptureBackend.h src/AScreenCaptureBackend.cpp
     src/KWinScreenCaptureBackend.h src/KWinScreenCaptureBackend.cpp
     src/GlobalShortcutPortal.h src/GlobalShortcutPortal.cpp
-    src/ShoWThisConstants.h 
+    src/ShoWThisConstants.h src/OcrEngine.h 
 )
 
 target_link_libraries(ShoWThis
@@ -26,6 +36,8 @@ target_link_libraries(ShoWThis
 
         LayerShellQt::Interface
 )
+
+target_link_libraries(ShoWThis PRIVATE PkgConfig::TESSERACT PkgConfig::LEPTONICA)
 
 install(TARGETS ShoWThis
     BUNDLE  DESTINATION .

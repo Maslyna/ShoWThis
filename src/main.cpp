@@ -18,7 +18,7 @@
 #include "ShoWSurface.h"
 #include "ShoWThisConstants.h"
 
-void registerHostApp() {
+void register_host_app() {
     // The Registry interface only exists for unsandboxed ("host") apps.
     // Under Flatpak the app id is already known via .flatpak-info, and
     // calling Register() there is unsupported/unnecessary.
@@ -41,12 +41,11 @@ void registerHostApp() {
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
-    ShoWSurface w;
     app.setQuitOnLastWindowClosed(false);
 
     QDBusConnection bus = QDBusConnection::sessionBus();
 
-    registerHostApp();
+    register_host_app();
 
     if (!bus.registerService(showthis::APP_ID)) {
         qWarning("Failed to register the service's name. Probably, another "
@@ -56,6 +55,7 @@ int main(int argc, char *argv[]) {
 
     QScreen *screen = nullptr;
 
+    showthis::ShoWSurface w;
     w.setFlags(Qt::FramelessWindowHint);
 
     auto *layerShell = LayerShellQt::Window::get(&w);
@@ -85,10 +85,18 @@ int main(int argc, char *argv[]) {
     tray.setToolTip("Screen Translator (running)");
     tray.show();
 
+    showthis::ocr::OcrEngine ocr_engine{{"eng+ukr+rus+deu"}};
     showthis::KWinScreenCaptureBackend backend;
     QObject::connect(&backend, &showthis::AScreenCaptureBackend::captured, [&](const QImage &img) {
-        w.setImage(img);
-        w.setVisible(!w.isVisible());
+        QList<showthis::ocr::WordBox> words;
+
+        try {
+            words = ocr_engine.scan_image(img);
+        } catch (const std::exception &ex) {
+            qCritical() << ex.what();
+        }
+
+        w.set_image(img, words);
     });
     QObject::connect(
         &backend, &showthis::AScreenCaptureBackend::capture_failed, [&](const QString &reason) {
@@ -99,7 +107,11 @@ int main(int argc, char *argv[]) {
     showthis::GlobalShortcutPortal portal;
     QObject::connect(&portal, &showthis::GlobalShortcutPortal::shortcut_activated, [&](const QString &id) {
         qDebug() << "Got shortcut:" << id << "-> toggle window here, even though the app is unfocused";
-        backend.capture();
+
+        w.setVisible(!w.isVisible());
+        if (w.isVisible()) {
+            backend.capture();
+        }
     });
     portal.start();
 
