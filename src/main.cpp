@@ -85,18 +85,19 @@ int main(int argc, char *argv[]) {
     tray.setToolTip("Screen Translator (running)");
     tray.show();
 
-    KWinScreenCaptureBackend backend;
-    QObject::connect(&backend, &AScreenCaptureBackend::captured, [&](const QImage &img) {
+    showthis::KWinScreenCaptureBackend backend;
+    QObject::connect(&backend, &showthis::AScreenCaptureBackend::captured, [&](const QImage &img) {
         w.setImage(img);
         w.setVisible(!w.isVisible());
     });
-    QObject::connect(&backend, &AScreenCaptureBackend::capture_failed, [&](const QString &reason) {
-        qWarning() << "capture failed:" << reason;
-        app.exit(1);
-    });
+    QObject::connect(
+        &backend, &showthis::AScreenCaptureBackend::capture_failed, [&](const QString &reason) {
+            qWarning() << "capture failed:" << reason;
+            app.exit(1);
+        });
 
-    GlobalShortcutPortal portal;
-    QObject::connect(&portal, &GlobalShortcutPortal::shortcutActivated, [&](const QString &id) {
+    showthis::GlobalShortcutPortal portal;
+    QObject::connect(&portal, &showthis::GlobalShortcutPortal::shortcut_activated, [&](const QString &id) {
         qDebug() << "Got shortcut:" << id << "-> toggle window here, even though the app is unfocused";
         backend.capture();
     });

@@ -8,8 +8,9 @@
 
 class QDBusPendingCallWatcher;
 
-class KWinScreenCaptureBackend : public AScreenCaptureBackend
-{
+namespace showthis {
+
+class KWinScreenCaptureBackend : public AScreenCaptureBackend {
     Q_OBJECT
 public:
     explicit KWinScreenCaptureBackend(QObject *parent = nullptr);
@@ -29,4 +30,5 @@ private:
     int m_pipe_read_fd = -1;
 };
 
-#endif // KWINSCREENCAPTUREBACKEND_H
+}  // namespace showthis
+#endif  // KWINSCREENCAPTUREBACKEND_H

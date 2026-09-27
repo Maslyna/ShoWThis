@@ -2,23 +2,22 @@
 #ifndef GLOBALSHORTCUTPORTAL_H
 #define GLOBALSHORTCUTPORTAL_H
 
-#include <QObject>
 #include <QDBusArgument>
-#include <QDBusMessage>
 #include <QDBusInterface>
+#include <QDBusMessage>
+#include <QObject>
 
-struct ShortcutDescription
-{
+namespace showthis {
+
+struct ShortcutDescription {
     QString id;
     QVariantMap options;
 };
-Q_DECLARE_METATYPE(ShortcutDescription)
 
 QDBusArgument &operator<<(QDBusArgument &arg, const ShortcutDescription &shortcut);
 const QDBusArgument &operator>>(const QDBusArgument &arg, ShortcutDescription &shortcut);
 
-class GlobalShortcutPortal : public QObject
-{
+class GlobalShortcutPortal : public QObject {
     Q_OBJECT
 public:
     explicit GlobalShortcutPortal(QObject *parent = nullptr);
@@ -26,19 +25,22 @@ public:
     void start();
 
 signals:
-    void shortcutActivated(const QString &shortcutId);
+    void shortcut_activated(const QString &shortcutId);
 
 private slots:
-    void onSessionCreated(const QDBusMessage &msg);
-    void onShortcutsBound(const QDBusMessage &msg);
-    void onActivated(const QDBusMessage &msg);
+    void on_session_created(const QDBusMessage &msg);
+    void on_shortcuts_bound(const QDBusMessage &msg);
+    void on_activated(const QDBusMessage &msg);
 
 private:
-    static QString newToken();
+    static QString gen_new_token();
 
     QDBusInterface *m_portal;
     QString m_sessionHandle;
 };
 
-#endif // GLOBALSHORTCUTPORTAL_H
+}
 
+Q_DECLARE_METATYPE(showthis::ShortcutDescription)
+
+#endif  // GLOBALSHORTCUTPORTAL_H

@@ -16,6 +16,8 @@
 
 #include "ShoWThisConstants.h"
 
+namespace showthis {
+
 KWinScreenCaptureBackend::KWinScreenCaptureBackend(QObject *parent)
     : AScreenCaptureBackend(parent) {}
 
@@ -40,7 +42,7 @@ void KWinScreenCaptureBackend::capture() {
 
     QDBusMessage message = QDBusMessage::createMethodCall(showthis::KWIN_SCREENSHOT2_SERVICE,
                                                           showthis::KWIN_SCREENSHOT2_OBJECT_PATH,
-                                                          showthis::KWIN_SCREENSHOT2_INTERFACE,
+                                                          showthis::KWIN_SCREENSHOT2_IFACE,
                                                           QStringLiteral("CaptureActiveScreen"));
     message << QVariant(options) << QVariant::fromValue(QDBusUnixFileDescriptor(write_fd));
 
@@ -126,4 +128,6 @@ void KWinScreenCaptureBackend::reset() {
     }
     m_buffer.clear();
     m_width = m_height = m_stride = m_format = 0;
+}
+
 }

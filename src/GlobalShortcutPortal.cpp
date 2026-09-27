@@ -10,10 +10,10 @@ namespace {
 
 using namespace Qt::Literals::StringLiterals;
 
-const QString GSHORTCUT_PORTAL_IFACE = u"org.freedesktop.portal.GlobalShortcuts"_s;
-const QString REQUEST_IFACE          = u"org.freedesktop.portal.Request"_s;
 
 }  // namespace
+
+namespace showthis {
 
 QDBusArgument &operator<<(QDBusArgument &arg, const ShortcutDescription &shortcut) {
     arg.beginStructure();
@@ -36,12 +36,12 @@ GlobalShortcutPortal::GlobalShortcutPortal(QObject *parent) : QObject(parent) {
 
     m_portal = new QDBusInterface(showthis::DESKTOP_PORTAL_SERVICE,
                                   showthis::DESKTOP_PORTAL_PATH,
-                                  GSHORTCUT_PORTAL_IFACE,
+                                  showthis::GSHORTCUT_PORTAL_IFACE,
                                   QDBusConnection::sessionBus(),
                                   this);
 }
 
-QString GlobalShortcutPortal::newToken() {
+QString GlobalShortcutPortal::gen_new_token() {
     return "t" + QUuid::createUuid().toString(QUuid::Id128);
 }
 
@@ -49,12 +49,12 @@ void GlobalShortcutPortal::start() {
     // Subscribe once; every bound shortcut's activation arrives here.
     QDBusConnection::sessionBus().connect(showthis::DESKTOP_PORTAL_SERVICE,
                                           showthis::DESKTOP_PORTAL_PATH,
-                                          GSHORTCUT_PORTAL_IFACE,
+                                          showthis::GSHORTCUT_PORTAL_IFACE,
                                           "Activated",
                                           this,
-                                          SLOT(onActivated(QDBusMessage)));
+                                          SLOT(on_activated(QDBusMessage)));
 
-    QString token = newToken();
+    QString token = gen_new_token();
     QVariantMap options{{"handle_token", token}, {"session_handle_token", token}};
 
     QDBusReply<QDBusObjectPath> reply = m_portal->call("CreateSession", options);
@@ -66,13 +66,13 @@ void GlobalShortcutPortal::start() {
     // The real result comes asynchronously via Request::Response on this path.
     QDBusConnection::sessionBus().connect(QString(),
                                           reply.value().path(),
-                                          REQUEST_IFACE,
+                                          showthis::REQUEST_IFACE,
                                           "Response",
                                           this,
-                                          SLOT(onSessionCreated(QDBusMessage)));
+                                          SLOT(on_session_created(QDBusMessage)));
 }
 
-void GlobalShortcutPortal::onSessionCreated(const QDBusMessage &msg) {
+void GlobalShortcutPortal::on_session_created(const QDBusMessage &msg) {
     const QList<QVariant> args = msg.arguments();
     const uint responseCode    = args.at(0).toUInt();
     const QVariantMap results  = qdbus_cast<QVariantMap>(args.at(1));
@@ -90,11 +90,11 @@ void GlobalShortcutPortal::onSessionCreated(const QDBusMessage &msg) {
                                        {"preferred_trigger", "CTRL+ALT+SPACE"}};
     QList<ShortcutDescription> shortcuts{toggleWindow};
 
-    QVariantMap bindOptions{{"handle_token", newToken()}};
+    QVariantMap bindOptions{{"handle_token", gen_new_token()}};
 
     QDBusMessage call = QDBusMessage::createMethodCall(showthis::DESKTOP_PORTAL_SERVICE,
                                                        showthis::DESKTOP_PORTAL_PATH,
-                                                       GSHORTCUT_PORTAL_IFACE,
+                                                       showthis::GSHORTCUT_PORTAL_IFACE,
                                                        "BindShortcuts");
     call << QVariant::fromValue(QDBusObjectPath(m_sessionHandle)) << QVariant::fromValue(shortcuts)
          << QString("")  // parent_window, empty = none
@@ -109,17 +109,17 @@ void GlobalShortcutPortal::onSessionCreated(const QDBusMessage &msg) {
     QDBusObjectPath requestPath = reply.arguments().at(0).value<QDBusObjectPath>();
     QDBusConnection::sessionBus().connect(QString(),
                                           requestPath.path(),
-                                          REQUEST_IFACE,
+                                          showthis::REQUEST_IFACE,
                                           "Response",
                                           this,
-                                          SLOT(onShortcutsBound(QDBusMessage)));
+                                          SLOT(on_shortcuts_bound(QDBusMessage)));
 }
 
-void GlobalShortcutPortal::onShortcutsBound(const QDBusMessage &msg) {
+void GlobalShortcutPortal::on_shortcuts_bound(const QDBusMessage &msg) {
     qDebug() << "BindShortcuts response:" << msg.arguments();
 }
 
-void GlobalShortcutPortal::onActivated(const QDBusMessage &msg) {
+void GlobalShortcutPortal::on_activated(const QDBusMessage &msg) {
     // Signature: session_handle(o), shortcut_id(s), timestamp(t), options(a{sv})
     const QList<QVariant> args = msg.arguments();
     const QString session      = args.at(0).value<QDBusObjectPath>().path();
@@ -128,5 +128,7 @@ void GlobalShortcutPortal::onActivated(const QDBusMessage &msg) {
 
     const QString shortcutId = args.at(1).toString();
     qDebug() << "Shortcut activated:" << shortcutId;
-    emit shortcutActivated(shortcutId);
+    emit shortcut_activated(shortcutId);
 }
+
+}  // namespace showthis

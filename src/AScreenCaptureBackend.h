@@ -3,8 +3,9 @@
 
 #include <QObject>
 
-class AScreenCaptureBackend : public QObject
-{
+namespace showthis {
+
+class AScreenCaptureBackend : public QObject {
     Q_OBJECT
 
 public:
@@ -18,4 +19,6 @@ signals:
     void capture_failed(const QString &reason);
 };
 
-#endif // ASCREENCAPTUREBACKEND_H
+}  // namespace showthis
+
+#endif  // ASCREENCAPTUREBACKEND_H

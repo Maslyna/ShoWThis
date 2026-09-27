@@ -6,10 +6,14 @@ namespace showthis {
 
 inline const QString APP_ID         = QStringLiteral("dev.maslyna.ShoWThis");
 inline const QString REGISTRY_IFACE = QStringLiteral("org.freedesktop.host.portal.Registry");
+inline const QString REQUEST_IFACE  = QStringLiteral("org.freedesktop.portal.Request");
 inline const QString DESKTOP_PORTAL_SERVICE = QStringLiteral("org.freedesktop.portal.Desktop");
 inline const QString DESKTOP_PORTAL_PATH    = QStringLiteral("/org/freedesktop/portal/desktop");
 
-inline const QString KWIN_SCREENSHOT2_SERVICE = QStringLiteral(u"org.kde.KWin.ScreenShot2");
-inline const QString KWIN_SCREENSHOT2_OBJECT_PATH = QStringLiteral(u"/org/kde/KWin/ScreenShot2");
-inline const QString KWIN_SCREENSHOT2_INTERFACE = QStringLiteral(u"org.kde.KWin.ScreenShot2");
+inline const QString KWIN_SCREENSHOT2_SERVICE     = QStringLiteral("org.kde.KWin.ScreenShot2");
+inline const QString KWIN_SCREENSHOT2_OBJECT_PATH = QStringLiteral("/org/kde/KWin/ScreenShot2");
+inline const QString KWIN_SCREENSHOT2_IFACE       = QStringLiteral("org.kde.KWin.ScreenShot2");
+inline const QString GSHORTCUT_PORTAL_IFACE =
+    QStringLiteral("org.freedesktop.portal.GlobalShortcuts");
+
 }  // namespace showthis

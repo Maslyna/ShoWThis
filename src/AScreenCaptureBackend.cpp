@@ -1,5 +1,7 @@
 #include "AScreenCaptureBackend.h"
 
-AScreenCaptureBackend::AScreenCaptureBackend(QObject *parent)
-    : QObject{parent}
-{}
+namespace showthis {
+
+AScreenCaptureBackend::AScreenCaptureBackend(QObject *parent) : QObject{parent} {}
+
+}  // namespace showthis
