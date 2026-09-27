@@ -40,11 +40,17 @@ protected:
         if (m_words.isEmpty())
             return;
 
+        const qreal sx = qreal(width()) / m_image.width();
+        const qreal sy = qreal(height()) / m_image.height();
+
         p.setPen(QPen(Qt::blue, 2));
         p.setBrush(Qt::NoBrush);
 
         for (const auto &word : m_words) {
-            p.drawRect(word.rect);
+            const QRectF rect{
+                word.rect.x() * sx, word.rect.y() * sy, word.rect.width() * sx, word.rect.height() * sy};
+
+            p.drawRect(rect);
         }
     }
 

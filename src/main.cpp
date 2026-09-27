@@ -109,9 +109,7 @@ int main(int argc, char *argv[]) {
         qDebug() << "Got shortcut:" << id << "-> toggle window here, even though the app is unfocused";
 
         w.setVisible(!w.isVisible());
-        if (w.isVisible()) {
-            backend.capture();
-        }
+        backend.capture();
     });
     portal.start();
 
