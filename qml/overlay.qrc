@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/qml">
+        <file>Overlay.qml</file>
+        <file>LearningPanel.qml</file>
+        <file>NotebookButton.qml</file>
+        <file>NotebookSurface.qml</file>
+        <file>NotebookEmpty.qml</file>
+        <file>NotebookConfirm.qml</file>
+        <file>NotebookWordRow.qml</file>
+        <file>NotebookSettings.qml</file>
+    </qresource>
+</RCC>

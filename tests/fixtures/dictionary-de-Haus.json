@@ -1,0 +1,23 @@
+{
+  "word": "Haus",
+  "entries": [{
+    "language": {"code": "de", "name": "German"},
+    "partOfSpeech": "noun",
+    "pronunciations": [{"text": "haʊs", "type": "ipa", "tags": []}],
+    "forms": [{"word": "Häuser", "tags": ["plural"]}],
+    "senses": [{
+      "definition": "house",
+      "tags": ["neuter"],
+      "examples": ["Das ist mein Haus."],
+      "translations": [{"language": {"code": "uk"}, "word": "будинок"}],
+      "subsenses": [{"definition": "home", "examples": []}]
+    }]
+  }],
+  "source": {
+    "url": "https://en.wiktionary.org/wiki/Haus",
+    "license": {
+      "name": "CC BY-SA 4.0",
+      "url": "https://creativecommons.org/licenses/by-sa/4.0/"
+    }
+  }
+}
