@@ -17,11 +17,8 @@ Pane {
     property int compact_page: 0
     property bool context_expanded: false
     property bool lookup_attempted: false
-    property string noun_article: ""
-    readonly property var article_codes: ["", "der", "die", "das"]
+    property string word_prefix: ""
     readonly property bool wide_layout: width >= 880
-    readonly property var source_codes: ["de", "en", "uk", "ru"]
-    readonly property var target_codes: ["uk", "ru", "en"]
     readonly property var active_source: service.source.url ? service.source : saved_source
     readonly property var current_sense: selected_sense >= 0 && selected_sense < service.senses.length
         ? service.senses[selected_sense] : ({})
@@ -32,7 +29,6 @@ Pane {
     visible: false
     focus: visible
     objectName: "learning_panel"
-    Keys.onEscapePressed: visible = false
 
     // Use the desktop palette explicitly: a Controls style may otherwise choose
     // its own initial light palette when a new QML engine is created.
@@ -89,7 +85,7 @@ Pane {
         meaning_input.text = card.meaning || ""
         translation_input.text = card.translation || ""
         notes_input.text = card.notes || ""
-        noun_article = card.article || ""
+        word_prefix = card.article || ""
         notes_toggle.checked = notes_input.text.length > 0
         compact_page = card_id.length > 0 ? 1 : 0
         context_expanded = false
@@ -117,7 +113,7 @@ Pane {
         selected_sense = index
         meaning_input.text = current_sense.definition || ""
         translation_input.text = native_translation(current_sense)
-        noun_article = current_sense.article || ""
+        word_prefix = current_sense.article || ""
         mark_dirty()
         if (!wide_layout) compact_page = 1
     }
@@ -132,7 +128,7 @@ Pane {
         if (!save_button.enabled)
             return
         if (service.save_word(card_id, word_input.text, context_input.text,
-                meaning_input.text, translation_input.text, notes_input.text, selected_sense, noun_article)) {
+                meaning_input.text, translation_input.text, notes_input.text, selected_sense, word_prefix)) {
             if (card_id.length === 0) card_id = service.vocabulary[0].id
             dirty = false
         }
@@ -272,7 +268,7 @@ Pane {
                     objectName: "hide_notebook"
                     Accessible.name: qsTr("Back to screen")
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("Back to screen · Esc\nYour draft stays open")
+                    ToolTip.text: qsTr("Back to screen\nYour draft stays open")
                     onClicked: panel.visible = false
                 }
             }
@@ -351,24 +347,27 @@ Pane {
                                             panel.lookup_attempted = false
                                             panel.service.clear()
                                             panel.saved_source = ({})
-                                            panel.noun_article = ""
+                                            panel.word_prefix = ""
                                             meaning_input.clear()
                                             translation_input.clear()
                                             panel.mark_dirty()
                                         }
                                     }
-                                    ComboBox {
+                                    NotebookLanguagePicker {
                                         objectName: "lookup_language"
-                                        model: panel.wide_layout ? ["Deutsch", "English", "Українська", "Русский"] : ["DE", "EN", "UK", "RU"]
-                                        currentIndex: panel.source_codes.indexOf(panel.service.source_language)
+                                        options: panel.service.language_options
+                                        language_code: panel.service.source_language
+                                        compact: !panel.wide_layout
                                         Layout.preferredWidth: panel.wide_layout ? 120 : 64
                                         enabled: !panel.busy
                                         Accessible.name: qsTr("Word language, separate from OCR")
-                                        onActivated: {
+                                        onLanguage_selected: function(code) {
+                                            const previous = panel.service.source_language
+                                            panel.service.source_language = code
+                                            if (panel.service.source_language === previous) return
                                             panel.lookup_attempted = false
-                                            panel.service.source_language = panel.source_codes[currentIndex]
                                             panel.saved_source = ({})
-                                            panel.noun_article = ""
+                                            panel.word_prefix = ""
                                             meaning_input.clear()
                                             translation_input.clear()
                                             panel.mark_dirty()
@@ -525,7 +524,7 @@ Pane {
                                                             Layout.fillWidth: true
                                                         }
                                                         Label {
-                                                            visible: panel.service.source_language === "de" && (sense_row.modelData.articles || []).length > 0
+                                                            visible: (sense_row.modelData.articles || []).length > 0
                                                             text: (sense_row.modelData.articles || []).join(" / ") + " " + word_input.text
                                                             color: panel.palette.highlight
                                                             font.weight: Font.DemiBold
@@ -609,40 +608,35 @@ Pane {
                                                 width: parent.width
                                                 spacing: 10
                                                 RowLayout {
-                                                    visible: panel.service.source_language === "de"
                                                     Layout.fillWidth: true
-                                                    Label { text: qsTr("German article"); font.bold: true; font.pixelSize: 12; Layout.fillWidth: true }
-                                                    ComboBox {
-                                                        objectName: "german_article"
-                                                        model: [qsTr("Not set"), "der", "die", "das"]
-                                                        currentIndex: panel.article_codes.indexOf(panel.noun_article)
-                                                        Layout.preferredWidth: 125
-                                                        Accessible.name: qsTr("German noun article, nominative")
-                                                        onActivated: {
-                                                            panel.noun_article = panel.article_codes[currentIndex]
+                                                    Label { text: qsTr("Article / prefix"); font.bold: true; font.pixelSize: 12 }
+                                                    TextField {
+                                                        objectName: "word_prefix"
+                                                        text: panel.word_prefix
+                                                        placeholderText: qsTr("Optional")
+                                                        maximumLength: 80
+                                                        Layout.fillWidth: true
+                                                        Layout.minimumWidth: 0
+                                                        Accessible.name: qsTr("Optional article or word prefix")
+                                                        onTextEdited: {
+                                                            panel.word_prefix = text
                                                             panel.mark_dirty()
                                                         }
                                                     }
                                                 }
                                                 Label {
-                                                    objectName: "german_headword"
-                                                    visible: panel.service.source_language === "de" && panel.noun_article.length > 0
-                                                    text: word_input.text.toLowerCase().startsWith(panel.noun_article + " ")
-                                                        ? word_input.text : panel.noun_article + " " + word_input.text
+                                                    objectName: "word_headword"
+                                                    visible: panel.word_prefix.length > 0
+                                                    text: {
+                                                        const prefix = panel.word_prefix.trim()
+                                                        const joined = /['’\-]$/.test(prefix) ? prefix : prefix + " "
+                                                        return word_input.text.toLowerCase().startsWith(joined.toLowerCase())
+                                                            ? word_input.text : joined + word_input.text
+                                                    }
                                                     textFormat: Text.PlainText
                                                     font.pixelSize: 22
                                                     font.weight: Font.DemiBold
                                                     color: panel.palette.highlight
-                                                    wrapMode: Text.WordWrap
-                                                    Layout.fillWidth: true
-                                                }
-                                                Label {
-                                                    visible: panel.service.source_language === "de" && panel.noun_article.length === 0
-                                                    text: (panel.current_sense.articles || []).length > 1
-                                                        ? qsTr("This meaning has multiple genders. Choose the article you want to learn.")
-                                                        : qsTr("For nouns, keep der/die/das with the word. If unknown, choose the article manually; verbs need none.")
-                                                    opacity: 0.65
-                                                    font.pixelSize: 11
                                                     wrapMode: Text.WordWrap
                                                     Layout.fillWidth: true
                                                 }
@@ -661,14 +655,17 @@ Pane {
                                                 RowLayout {
                                                     Layout.fillWidth: true
                                                     Label { text: qsTr("Translation"); font.bold: true; font.pixelSize: 12; Layout.fillWidth: true }
-                                                    ComboBox {
-                                                        model: ["Українська", "Русский", "English"]
+                                                    NotebookLanguagePicker {
+                                                        objectName: "target_language"
+                                                        options: panel.service.language_options
+                                                        language_code: panel.service.target_language
                                                         Layout.preferredWidth: 125
-                                                        currentIndex: panel.target_codes.indexOf(panel.service.target_language)
                                                         enabled: !panel.busy
                                                         Accessible.name: qsTr("Translation language")
-                                                        onActivated: {
-                                                            panel.service.target_language = panel.target_codes[currentIndex]
+                                                        onLanguage_selected: function(code) {
+                                                            const previous = panel.service.target_language
+                                                            panel.service.target_language = code
+                                                            if (panel.service.target_language === previous) return
                                                             translation_input.text = panel.native_translation(panel.current_sense)
                                                             panel.mark_dirty()
                                                         }

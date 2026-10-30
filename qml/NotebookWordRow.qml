@@ -7,8 +7,12 @@ ItemDelegate {
     required property var entry
     property bool is_history: false
     property bool selected: false
-    readonly property string display_word: entry.language === "de" && (entry.article || "").length > 0
-        && !entry.word.toLowerCase().startsWith(entry.article + " ") ? entry.article + " " + entry.word : entry.word
+    readonly property string display_word: {
+        const prefix = (entry.article || "").trim()
+        if (prefix.length === 0) return entry.word
+        const joined = /['’\-]$/.test(prefix) ? prefix : prefix + " "
+        return entry.word.toLowerCase().startsWith(joined.toLowerCase()) ? entry.word : joined + entry.word
+    }
     signal open_requested()
     signal selection_toggled(bool checked)
     signal delete_requested()

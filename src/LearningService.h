@@ -26,6 +26,7 @@ class LearningService : public QObject {
     Q_PROPERTY(QString target_language READ target_language WRITE set_target_language NOTIFY preferences_changed)
     Q_PROPERTY(bool deepl_pro READ deepl_pro WRITE set_deepl_pro NOTIFY preferences_changed)
     Q_PROPERTY(bool has_translation_key READ has_translation_key NOTIFY preferences_changed)
+    Q_PROPERTY(QVariantList language_options READ language_options CONSTANT)
 
 public:
     explicit LearningService(QObject *parent = nullptr, const QString &file_name = {},
@@ -45,6 +46,7 @@ public:
     QString target_language() const { return m_target_language; }
     bool deepl_pro() const { return m_deepl_pro; }
     bool has_translation_key() const { return !m_api_key.isEmpty(); }
+    QVariantList language_options() const;
     void set_source_language(const QString &language);
     void set_target_language(const QString &language);
     void set_deepl_pro(bool pro);

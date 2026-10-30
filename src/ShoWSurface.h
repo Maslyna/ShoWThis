@@ -48,7 +48,7 @@ signals:
     void selectedLanguageChanged();
     void scanningChanged();
     void errorChanged();
-    void closeRequested();
+    void hide_requested();
 
 private:
     ScreenshotProvider *m_provider;

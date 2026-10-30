@@ -13,31 +13,38 @@
 #include <QUuid>
 #include <QSet>
 #include <QRegularExpression>
+#include <QLocale>
+#include <algorithm>
 
 namespace showthis {
 namespace {
 
-QStringList german_articles(const QVariantMap &sense) {
-    if (sense.value("part_of_speech").toString() != "noun")
-        return {};
-    const auto tags = sense.value("tags").toStringList();
-    if (tags.contains("plural-only"))
-        return {"die"};
-    QStringList articles;
-    if (tags.contains("masculine")) articles.append("der");
-    if (tags.contains("feminine")) articles.append("die");
-    if (tags.contains("neuter")) articles.append("das");
-    return articles;
+QString single_article(const QVariantMap &sense) {
+    // Preserve explicit dictionary metadata, but never infer an article from
+    // gender using language-specific rules.
+    return sense.value("article").toString();
 }
 
-QString single_article(const QVariantMap &sense) {
-    const auto articles = german_articles(sense);
-    return articles.size() == 1 ? articles.first() : QString{};
+QString normalized_language_code(QString code) {
+    code = code.trimmed().toLower().replace('_', '-');
+    static const QRegularExpression pattern("^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$");
+    if (!pattern.match(code).hasMatch())
+        return {};
+    const auto base = code.section('-', 0, 0);
+    const auto language = QLocale::codeToLanguage(base);
+    if (language != QLocale::C && language != QLocale::AnyLanguage) {
+        const auto short_code = QLocale::languageToCode(language, QLocale::ISO639Part1);
+        if (!short_code.isEmpty())
+            code.replace(0, base.size(), short_code);
+    }
+    return code;
 }
 
 QString word_with_article(const QString &word, const QString &article) {
     if (article.isEmpty() || word.startsWith(article + ' ', Qt::CaseInsensitive))
         return word;
+    if (article.endsWith('\'') || article.endsWith(QChar(0x2019)) || article.endsWith('-'))
+        return word.startsWith(article, Qt::CaseInsensitive) ? word : article + word;
     return article + ' ' + word;
 }
 
@@ -53,14 +60,16 @@ void append_senses(const QJsonArray &senses, const QJsonObject &entry,
             break;
         const auto sense = value.toObject();
         auto tags = sense.value("tags").toVariant().toStringList();
-        const QStringList grammatical_tags{"masculine", "feminine", "neuter", "plural-only"};
-        bool has_gender = false;
-        for (const auto &tag : grammatical_tags)
-            has_gender = has_gender || tags.contains(tag);
-        if (!has_gender) {
-            for (const auto &tag : inherited_tags) {
-                if (grammatical_tags.contains(tag))
-                    tags.append(tag);
+        const QList<QStringList> grammar_groups{
+            {"masculine", "feminine", "neuter"}, {"plural-only", "plural", "singular", "dual"}};
+        for (const auto &group : grammar_groups) {
+            const bool has_own_tags = std::any_of(group.begin(), group.end(),
+                [&](const QString &tag) { return tags.contains(tag); });
+            if (!has_own_tags) {
+                for (const auto &tag : inherited_tags) {
+                    if (group.contains(tag))
+                        tags.append(tag);
+                }
             }
         }
         if (!sense.value("definition").toString().isEmpty()) {
@@ -69,8 +78,9 @@ void append_senses(const QJsonArray &senses, const QJsonObject &entry,
             item.insert("part_of_speech", entry.value("partOfSpeech").toString());
             item.insert("pronunciation", pronunciations.join(" · "));
             item.insert("forms", entry.value("forms").toArray().toVariantList());
-            const auto articles = entry.value("language").toObject().value("code").toString() == "de"
-                ? german_articles(item) : QStringList{};
+            auto articles = sense.value("articles").toVariant().toStringList();
+            if (articles.isEmpty() && !sense.value("article").toString().isEmpty())
+                articles.append(sense.value("article").toString());
             item.insert("articles", articles);
             item.insert("article", articles.size() == 1 ? articles.first() : QString{});
             result.append(item);
@@ -85,6 +95,8 @@ QString request_error(QNetworkReply *reply, const QString &service) {
         return QObject::tr("No dictionary entry found. Try the dictionary form or correct the OCR text.");
     if (status == 429)
         return QObject::tr("%1 rate limit reached. Please try again later.").arg(service);
+    if (status == 400)
+        return QObject::tr("%1 rejected the request. Check the language codes and whether this language pair is supported.").arg(service);
     if (status == 403)
         return QObject::tr("DeepL rejected the API key. Check the key and Free/Pro selection.");
     if (status == 456)
@@ -111,12 +123,13 @@ LearningService::LearningService(QObject *parent, const QString &file_name,
       m_file_name(file_name.isEmpty()
           ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/vocabulary.json"
           : file_name) {
-    m_source_language = m_settings.value("learning/source_language", "de").toString();
-    if (!QStringList{"de", "en", "uk", "ru"}.contains(m_source_language))
-        m_source_language = "de";
-    m_target_language = m_settings.value("learning/target_language", "uk").toString();
-    if (!QStringList{"uk", "ru", "en"}.contains(m_target_language))
-        m_target_language = "uk";
+    m_source_language = normalized_language_code(m_settings.value("learning/source_language", "en").toString());
+    if (m_source_language.isEmpty())
+        m_source_language = "en";
+    m_target_language = normalized_language_code(m_settings.value("learning/target_language",
+        QLocale::languageToCode(QLocale::system().language())).toString());
+    if (m_target_language.isEmpty())
+        m_target_language = "en";
     m_deepl_pro = m_settings.value("learning/deepl_pro", false).toBool();
     m_api_key = qEnvironmentVariable("SHOWTHIS_DEEPL_API_KEY").trimmed();
     m_history_limit = qBound(0, m_settings.value("learning/history_limit", 1000).toInt(), 10000);
@@ -136,11 +149,10 @@ LearningService::LearningService(QObject *parent, const QString &file_name,
         return;
     }
     m_cards = object.value("cards").toArray().toVariantList();
-    // Old saved cards already contain the selected sense's gender tags.
-    // Enrich those in memory; an explicitly cleared article stays cleared.
+    // Retain explicit article metadata from older cards, for any language.
     for (auto &value : m_cards) {
         auto card = value.toMap();
-        if (card.value("language").toString() == "de" && !card.contains("article")) {
+        if (!card.contains("article")) {
             card.insert("article", single_article(card.value("sense").toMap()));
             value = card;
         }
@@ -204,20 +216,52 @@ void LearningService::clear() {
     emit translation_changed();
 }
 
+QVariantList LearningService::language_options() const {
+    static const QVariantList options = []() {
+        QVariantList result;
+        QSet<QString> seen;
+        for (const auto &locale : QLocale::matchingLocales(QLocale::AnyLanguage, QLocale::AnyScript, QLocale::AnyTerritory)) {
+            auto code = QLocale::languageToCode(locale.language(), QLocale::ISO639Part1);
+            if (code.isEmpty())
+                code = QLocale::languageToCode(locale.language(), QLocale::ISO639Part3);
+            if (code.isEmpty() || seen.contains(code) || locale.language() == QLocale::C)
+                continue;
+            seen.insert(code);
+            result.append(QVariantMap{{"code", code},
+                {"name", QLocale::languageToString(locale.language()) + " (" + code + ")"}});
+        }
+        std::sort(result.begin(), result.end(), [](const QVariant &left, const QVariant &right) {
+            return left.toMap().value("name").toString() < right.toMap().value("name").toString();
+        });
+        return result;
+    }();
+    return options;
+}
+
 void LearningService::set_source_language(const QString &language) {
-    if (language == m_source_language || !QStringList{"de", "en", "uk", "ru"}.contains(language))
+    const auto code = normalized_language_code(language);
+    if (code.isEmpty()) {
+        set_message(tr("Choose a language or enter a language code, for example fr, es, or ja."));
         return;
-    m_source_language = language;
-    m_settings.setValue("learning/source_language", language);
+    }
+    if (code == m_source_language)
+        return;
+    m_source_language = code;
+    m_settings.setValue("learning/source_language", code);
     clear();
     emit preferences_changed();
 }
 
 void LearningService::set_target_language(const QString &language) {
-    if (language == m_target_language || !QStringList{"uk", "ru", "en"}.contains(language))
+    const auto code = normalized_language_code(language);
+    if (code.isEmpty()) {
+        set_message(tr("Choose a translation language or enter its language code."));
         return;
-    m_target_language = language;
-    m_settings.setValue("learning/target_language", language);
+    }
+    if (code == m_target_language)
+        return;
+    m_target_language = code;
+    m_settings.setValue("learning/target_language", code);
     cancel(m_translation_reply);
     m_translation.clear();
     emit translation_changed();
@@ -306,7 +350,7 @@ void LearningService::display_dictionary(const QJsonObject &data) {
     m_senses.clear();
     for (const auto &value : data.value("entries").toArray()) {
         const auto entry = value.toObject();
-        if (entry.value("language").toObject().value("code").toString() == m_source_language)
+        if (normalized_language_code(entry.value("language").toObject().value("code").toString()) == m_source_language)
             append_senses(entry.value("senses").toArray(), entry, m_senses);
     }
     m_source = data.value("source").toObject().toVariantMap();
@@ -436,8 +480,8 @@ bool LearningService::write_store(const QVariantList &cards, const QJsonObject &
 bool LearningService::save_word(const QString &id, const QString &word, const QString &context,
                                const QString &meaning, const QString &translation,
                                const QString &notes, int sense_index, const QString &article) {
-    if (!QStringList{"auto", "", "der", "die", "das"}.contains(article)) {
-        set_message(tr("Choose der, die, das, or no article."));
+    if (article.trimmed().size() > 80 || article.contains('\n') || article.contains('\r') || article.contains('\t')) {
+        set_message(tr("Keep the optional word prefix to one line, at most 80 characters."));
         return false;
     }
     if (word.trimmed().isEmpty() || (meaning.trimmed().isEmpty() && translation.trimmed().isEmpty())) {
@@ -467,16 +511,10 @@ bool LearningService::save_word(const QString &id, const QString &word, const QS
     card.insert("source", matching ? m_source : unchanged ? old.value("source").toMap() : QVariantMap{});
     card.insert("sense", matching && sense_index >= 0 && sense_index < m_senses.size()
         ? m_senses[sense_index].toMap() : unchanged ? old.value("sense").toMap() : QVariantMap{});
-    QString noun_article;
-    if (m_source_language == "de") {
-        if (article != "auto")
-            noun_article = article;
-        else if (unchanged && old.contains("article") && sense_index < 0)
-            noun_article = old.value("article").toString();
-        else
-            noun_article = single_article(card.value("sense").toMap());
-    }
-    card.insert("article", noun_article);
+    const auto word_prefix = article != "auto" ? article.trimmed()
+        : unchanged && old.contains("article") && sense_index < 0 ? old.value("article").toString()
+        : single_article(card.value("sense").toMap());
+    card.insert("article", word_prefix);
     if (existing >= 0)
         cards[existing] = card;
     else
@@ -526,7 +564,7 @@ bool LearningService::export_anki(const QUrl &destination, const QStringList &ca
         if (!requested.isEmpty() && !requested.contains(id))
             continue;
         found.insert(id);
-        const auto article = card.value("language").toString() == "de" ? card.value("article").toString() : QString{};
+        const auto article = card.value("article").toString();
         QString front = "<b>" + anki_html(word_with_article(card.value("word").toString(), article)) + "</b> <small>("
             + anki_html(card.value("language").toString().toUpper()) + ")</small>";
         const auto context = card.value("context").toString();

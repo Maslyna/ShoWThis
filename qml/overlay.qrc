@@ -8,5 +8,6 @@
         <file>NotebookConfirm.qml</file>
         <file>NotebookWordRow.qml</file>
         <file>NotebookSettings.qml</file>
+        <file>NotebookLanguagePicker.qml</file>
     </qresource>
 </RCC>

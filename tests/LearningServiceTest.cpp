@@ -379,7 +379,7 @@ void LearningServiceTest::anki_export() {
     service.lookup("Haus");
     QTRY_VERIFY(!service.dictionary_busy());
     const QString context = "<script>alert(1)</script>\t\"quoted\"\nSecond line";
-    QVERIFY(service.save_word({}, "Haus", context, "house & home", QString::fromUtf8("будинок"), "note\r\nnext", 0));
+    QVERIFY(service.save_word({}, "Haus", context, "house & home", QString::fromUtf8("будинок"), "note\r\nnext", 0, "das"));
     const auto first_id = service.vocabulary()[0].toMap().value("id").toString();
     QVERIFY(service.save_word({}, "Baum", "tree context", "tree", "", "", -1));
     const auto destination = QUrl::fromLocalFile(directory.filePath("anki.txt"));
@@ -418,16 +418,16 @@ void LearningServiceTest::anki_export() {
     QCOMPARE(file.readAll(), bytes); // Invalid selections do not clobber a previous export.
 }
 
-void LearningServiceTest::german_articles_data() {
+void LearningServiceTest::dictionary_grammar_data() {
     QTest::addColumn<QString>("language");
     QTest::addColumn<QString>("part_of_speech");
     QTest::addColumn<QStringList>("tags");
     QTest::addColumn<QStringList>("expected");
-    QTest::newRow("masculine") << QString("de") << QString("noun") << QStringList{"masculine"} << QStringList{"der"};
-    QTest::newRow("feminine") << QString("de") << QString("noun") << QStringList{"feminine"} << QStringList{"die"};
-    QTest::newRow("neuter") << QString("de") << QString("noun") << QStringList{"neuter"} << QStringList{"das"};
-    QTest::newRow("plural-only") << QString("de") << QString("noun") << QStringList{"plural-only"} << QStringList{"die"};
-    QTest::newRow("ambiguous") << QString("de") << QString("noun") << QStringList{"masculine", "feminine"} << QStringList{"der", "die"};
+    QTest::newRow("masculine") << QString("de") << QString("noun") << QStringList{"masculine"} << QStringList{};
+    QTest::newRow("french-feminine") << QString("fr") << QString("noun") << QStringList{"feminine"} << QStringList{};
+    QTest::newRow("neuter") << QString("de") << QString("noun") << QStringList{"neuter"} << QStringList{};
+    QTest::newRow("plural-only") << QString("de") << QString("noun") << QStringList{"plural-only"} << QStringList{};
+    QTest::newRow("spanish-multiple-genders") << QString("es") << QString("noun") << QStringList{"masculine", "feminine"} << QStringList{};
     QTest::newRow("unknown") << QString("de") << QString("noun") << QStringList{} << QStringList{};
     QTest::newRow("plural-form-unknown-gender") << QString("de") << QString("noun") << QStringList{"plural"} << QStringList{};
     QTest::newRow("verb") << QString("de") << QString("verb") << QStringList{"masculine"} << QStringList{};
@@ -435,7 +435,7 @@ void LearningServiceTest::german_articles_data() {
     QTest::newRow("not-german") << QString("en") << QString("noun") << QStringList{"neuter"} << QStringList{};
 }
 
-void LearningServiceTest::german_articles() {
+void LearningServiceTest::dictionary_grammar() {
     QFETCH(QString, language);
     QFETCH(QString, part_of_speech);
     QFETCH(QStringList, tags);
@@ -460,6 +460,7 @@ void LearningServiceTest::german_articles() {
         const auto parsed = value.toMap();
         QCOMPARE(parsed.value("articles").toStringList(), expected);
         QCOMPARE(parsed.value("article").toString(), expected.size() == 1 ? expected.first() : QString{});
+        QCOMPARE(parsed.value("tags").toStringList(), tags);
     }
     QVERIFY(service.save_word({}, "Haus", "", "house", "", "", 0));
     QCOMPARE(service.vocabulary()[0].toMap().value("article").toString(),
@@ -475,9 +476,9 @@ void LearningServiceTest::article_persistence_and_legacy_cards() {
     service.set_source_language("de");
     service.lookup("Haus");
     QTRY_VERIFY(!service.dictionary_busy());
-    // Subsenses inherit the parent sense's gender, rather than losing the article.
-    QCOMPARE(service.senses()[1].toMap().value("article").toString(), QString("das"));
-    QVERIFY(service.save_word({}, "Haus", "", "house", "", "", 1));
+    // Gender metadata remains, but no language-specific article is guessed.
+    QCOMPARE(service.senses()[1].toMap().value("tags").toStringList(), QStringList{"neuter"});
+    QVERIFY(service.save_word({}, "Haus", "", "house", "", "", 1, "das"));
     auto card = service.vocabulary()[0].toMap();
     const auto id = card.value("id").toString();
     QCOMPARE(card.value("article").toString(), QString("das"));
@@ -493,13 +494,24 @@ void LearningServiceTest::article_persistence_and_legacy_cards() {
         showthis::LearningService reopened(nullptr, path);
         QVERIFY(reopened.vocabulary()[0].toMap().value("article").toString().isEmpty());
     }
-    QVERIFY(!service.save_word({}, "Haus", "", "house", "", "", -1, "dem"));
-    service.set_source_language("en");
-    QVERIFY(service.save_word({}, "house", "", "house", "", "", -1, "das"));
-    QVERIFY(service.vocabulary()[0].toMap().value("article").toString().isEmpty());
+    QVERIFY(!service.save_word({}, "Haus", "", "house", "", "", -1, QString(81, 'x')));
+    service.set_source_language("fr");
+    QVERIFY(service.save_word({}, "maison", "", "house", "", "", -1, "la"));
+    QCOMPARE(service.vocabulary()[0].toMap().value("article").toString(), QString("la"));
+    QVERIFY(service.save_word({}, "ami", "", "friend", "", "", -1, "l'"));
+    const auto french_export = QUrl::fromLocalFile(directory.filePath("french.txt"));
+    QVERIFY(service.export_anki(french_export));
+    QFile french(french_export.toLocalFile());
+    QVERIFY(french.open(QIODevice::ReadOnly));
+    const auto french_data = french.readAll();
+    QVERIFY(french_data.contains("<b>la maison</b>"));
+    QVERIFY(french_data.contains("<b>l'ami</b>") || french_data.contains("<b>l&#39;ami</b>"));
 
     // A legacy card without an article field is enriched from its stored sense.
     card.remove("article");
+    auto old_sense = card.value("sense").toMap();
+    old_sense.insert("article", "das");
+    card.insert("sense", old_sense);
     QFile legacy(directory.filePath("legacy.json"));
     QVERIFY(legacy.open(QIODevice::WriteOnly));
     legacy.write(QJsonDocument(QJsonObject{{"version", 1}, {"cards", QJsonArray{QJsonObject::fromVariantMap(card)}},
@@ -512,4 +524,32 @@ void LearningServiceTest::article_persistence_and_legacy_cards() {
     QFile exported(destination.toLocalFile());
     QVERIFY(exported.open(QIODevice::ReadOnly));
     QVERIFY(exported.readAll().contains("<b>das Haus</b>"));
+}
+
+void LearningServiceTest::flexible_languages() {
+    QTemporaryDir directory;
+    TestNetwork network;
+    showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
+    service.set_source_language(" FRA ");
+    QCOMPARE(service.source_language(), QString("fr"));
+    service.set_target_language("ES");
+    QCOMPARE(service.target_language(), QString("es"));
+    service.set_source_language("ja");
+    QCOMPARE(service.source_language(), QString("ja"));
+    service.set_target_language("pt_BR");
+    QCOMPARE(service.target_language(), QString("pt-br"));
+    service.set_source_language("../invalid");
+    QCOMPARE(service.source_language(), QString("ja"));
+    QVERIFY(!service.message().isEmpty());
+    service.set_target_language("");
+    QCOMPARE(service.target_language(), QString("pt-br"));
+    QVERIFY(service.language_options().size() > 30);
+    bool has_french = false;
+    for (const auto &option : service.language_options())
+        has_french = has_french || option.toMap().value("code").toString() == "fr";
+    QVERIFY(has_french);
+    QCOMPARE(network.requests.size(), 0); // Choosing languages never sends text.
+    showthis::LearningService reopened(nullptr, directory.filePath("words.json"));
+    QCOMPARE(reopened.source_language(), QString("ja"));
+    QCOMPARE(reopened.target_language(), QString("pt-br"));
 }

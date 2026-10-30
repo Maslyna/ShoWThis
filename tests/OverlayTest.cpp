@@ -8,10 +8,23 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QtTest>
+#include <QSemaphore>
+#include <atomic>
+#include <stdexcept>
 
 #include "AppSettings.h"
 #include "ShoWSurface.h"
 #include "LearningService.h"
+#include "OverlayController.h"
+#include "AScreenCaptureBackend.h"
+
+class TestCaptureBackend : public showthis::AScreenCaptureBackend {
+public:
+    int capture_count = 0;
+    void capture() override { ++capture_count; }
+    void complete(const QImage &image) { emit captured(image); }
+    void fail(const QString &reason) { emit capture_failed(reason); }
+};
 
 static QQuickItem *find_item(QQuickItem *parent, const QString &name) {
     if (parent->objectName() == name)
@@ -97,12 +110,13 @@ private slots:
         if (!panel->property("wide_layout").toBool())
             QCOMPARE(panel->property("compact_page").toInt(), 1);
         QCOMPARE(translation->property("text").toString(), QString::fromUtf8("будинок"));
-        QCOMPARE(panel->property("noun_article").toString(), QStringLiteral("das"));
-        auto *article = find_item(surface.contentItem(), QStringLiteral("german_article"));
-        auto *headword = find_item(surface.contentItem(), QStringLiteral("german_headword"));
+        QCOMPARE(panel->property("word_prefix").toString(), QString{});
+        auto *article = find_item(surface.contentItem(), QStringLiteral("word_prefix"));
+        auto *headword = find_item(surface.contentItem(), QStringLiteral("word_headword"));
         QVERIFY(article);
         QVERIFY(headword);
-        QCOMPARE(article->property("currentIndex").toInt(), 3);
+        article->setProperty("text", QStringLiteral("das"));
+        QVERIFY(QMetaObject::invokeMethod(article, "textEdited"));
         QCOMPARE(headword->property("text").toString(), QStringLiteral("das Haus"));
         QVERIFY(QMetaObject::invokeMethod(save_button, "clicked"));
         QCOMPARE(service.vocabulary().size(), 1);
@@ -293,6 +307,52 @@ private slots:
         QCOMPARE(warnings.size(), 0);
     }
 
+    void flexible_language_controls() {
+        QTemporaryDir directory;
+        showthis::LearningService service(nullptr, directory.filePath(QStringLiteral("words.json")));
+        showthis::ShoWSurface surface;
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
+        surface.resize(1100, 800);
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        auto *panel = find_item(surface.contentItem(), QStringLiteral("learning_panel"));
+        QVERIFY(panel);
+        panel->setProperty("service", QVariant::fromValue(&service));
+        QVERIFY(QMetaObject::invokeMethod(panel, "open_word", Q_ARG(QString, QStringLiteral("maison")),
+            Q_ARG(QString, QStringLiteral("Voici ma maison."))));
+        auto *source = find_item(surface.contentItem(), QStringLiteral("lookup_language"));
+        auto *target = find_item(surface.contentItem(), QStringLiteral("target_language"));
+        auto *prefix = find_item(surface.contentItem(), QStringLiteral("word_prefix"));
+        auto *meaning = find_item(surface.contentItem(), QStringLiteral("word_meaning"));
+        auto *save = find_item(surface.contentItem(), QStringLiteral("save_word"));
+        QVERIFY(source);
+        QVERIFY(target);
+        QVERIFY(prefix);
+        QVERIFY(meaning);
+        QVERIFY(save);
+        source->setProperty("editText", QStringLiteral("fr"));
+        QVERIFY(QMetaObject::invokeMethod(source, "accepted"));
+        QCOMPARE(service.source_language(), QStringLiteral("fr"));
+        target->setProperty("editText", QStringLiteral("es"));
+        QVERIFY(QMetaObject::invokeMethod(target, "accepted"));
+        QCOMPARE(service.target_language(), QStringLiteral("es"));
+        prefix->setProperty("text", QStringLiteral("la"));
+        QVERIFY(QMetaObject::invokeMethod(prefix, "textEdited"));
+        meaning->setProperty("text", QStringLiteral("house"));
+        source->setProperty("editText", QStringLiteral("../invalid"));
+        QVERIFY(QMetaObject::invokeMethod(source, "accepted"));
+        QCOMPARE(service.source_language(), QStringLiteral("fr"));
+        QCOMPARE(meaning->property("text").toString(), QStringLiteral("house"));
+        QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+        QCOMPARE(service.vocabulary().size(), 1);
+        const auto card = service.vocabulary()[0].toMap();
+        QCOMPARE(card.value("language").toString(), QStringLiteral("fr"));
+        QCOMPARE(card.value("target_language").toString(), QStringLiteral("es"));
+        QCOMPARE(card.value("article").toString(), QStringLiteral("la"));
+        QCOMPARE(warnings.size(), 0);
+    }
+
     void language_settings() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
@@ -454,14 +514,294 @@ private slots:
         QTRY_VERIFY(dropdown->property("opened").toBool());
         auto *english = find_item(surface.contentItem(), QStringLiteral("languageChoice_eng"));
         QVERIFY(english);
-        QVERIFY(!english->isEnabled());
+        QVERIFY(english->isEnabled());
         click(cancel);
         surface.set_languages({QStringLiteral("eng")});
         QCOMPARE(surface.language(), QStringLiteral("eng"));
         QCOMPARE(warnings.size(), 0);
     }
 
-    void word_outlines_radio() {
+    void ocr_selection_persistence() {
+        QTemporaryDir directory;
+        const auto settings_file = directory.filePath(QStringLiteral("settings.ini"));
+        const QStringList languages{QStringLiteral("eng"), QStringLiteral("deu"), QStringLiteral("ukr")};
+        showthis::AppSettings settings(settings_file);
+        settings.set_ocr_language(QStringLiteral("eng"));
+        showthis::ShoWSurface surface;
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
+        surface.set_languages(languages);
+        surface.set_language(settings.ocr_language(languages));
+        QObject::connect(&surface, &showthis::ShoWSurface::selectedLanguageChanged,
+            &surface, [&]() { settings.set_ocr_language(surface.language()); });
+        surface.resize(800, 600);
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        const auto click = [&](QQuickItem *item) {
+            QTest::qWait(30);
+            QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier,
+                item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint());
+        };
+        auto *selector = find_item(surface.contentItem(), QStringLiteral("languageSelector"));
+        QVERIFY(selector);
+        click(selector);
+        auto *popup = surface.rootObject()->findChild<QObject *>(QStringLiteral("languagePopup"));
+        QVERIFY(popup);
+        QTRY_VERIFY(popup->property("opened").toBool());
+        auto *english = find_item(surface.contentItem(), QStringLiteral("languageChoice_eng"));
+        auto *german = find_item(surface.contentItem(), QStringLiteral("languageChoice_deu"));
+        auto *ukrainian = find_item(surface.contentItem(), QStringLiteral("languageChoice_ukr"));
+        auto *apply = find_item(surface.contentItem(), QStringLiteral("applyLanguages"));
+        auto *cancel = find_item(surface.contentItem(), QStringLiteral("cancelLanguages"));
+        QVERIFY(english);
+        QVERIFY(german);
+        QVERIFY(ukrainian);
+        QVERIFY(apply);
+        QVERIFY(cancel);
+        QVERIFY(english->isEnabled());
+
+        // Regression: checking a second language used to disable it before
+        // onClicked could update the draft, leaving only English saved.
+        click(german);
+        QVERIFY(german->isEnabled());
+        QVERIFY(german->property("checked").toBool());
+        click(apply);
+        QCOMPARE(surface.language(), QStringLiteral("eng+deu"));
+        {
+            showthis::AppSettings reopened(settings_file);
+            QCOMPARE(reopened.ocr_language(languages), QStringLiteral("eng+deu"));
+            showthis::ShoWSurface restarted;
+            restarted.set_languages(languages);
+            restarted.set_language(reopened.ocr_language(languages));
+            QCOMPARE(restarted.language(), QStringLiteral("eng+deu"));
+        }
+
+        click(selector);
+        QTRY_VERIFY(popup->property("opened").toBool());
+        click(english);
+        click(apply);
+        QCOMPARE(surface.language(), QStringLiteral("deu"));
+
+        click(selector);
+        QTRY_VERIFY(popup->property("opened").toBool());
+        click(german);
+        QVERIFY(!apply->isEnabled());
+        QVERIFY(english->isEnabled());
+        QVERIFY(german->isEnabled());
+        QVERIFY(ukrainian->isEnabled());
+        QCOMPARE(surface.language(), QStringLiteral("deu"));
+        click(cancel);
+        QCOMPARE(surface.language(), QStringLiteral("deu"));
+
+        click(selector);
+        QTRY_VERIFY(popup->property("opened").toBool());
+        QVERIFY(german->property("checked").toBool());
+        click(ukrainian);
+        click(apply);
+        QCOMPARE(surface.language(), QStringLiteral("deu+ukr"));
+        showthis::AppSettings reopened(settings_file);
+        QCOMPARE(reopened.ocr_language(languages), QStringLiteral("deu+ukr"));
+        QCOMPARE(warnings.size(), 0);
+    }
+
+    void escape_hides_overlay_and_preserves_draft() {
+        showthis::ShoWSurface surface;
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        surface.resize(1000, 700);
+        TestCaptureBackend backend;
+        showthis::OverlayController controller(surface, backend,
+            [](const QImage &, const QString &) { return showthis::ScanResult{}; });
+        QSignalSpy hide_requests(&surface, &showthis::ShoWSurface::hide_requested);
+        QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
+        controller.show_notebook();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        auto *panel = find_item(surface.contentItem(), QStringLiteral("learning_panel"));
+        QVERIFY(panel);
+        QVERIFY(QMetaObject::invokeMethod(panel, "open_word", Q_ARG(QString, QStringLiteral("word")),
+            Q_ARG(QString, QStringLiteral("Original sentence"))));
+        auto *meaning = find_item(surface.contentItem(), QStringLiteral("word_meaning"));
+        QVERIFY(meaning);
+        meaning->setProperty("text", QStringLiteral("Keep this unsaved meaning"));
+        meaning->forceActiveFocus();
+        QTest::keyClick(&surface, Qt::Key_Escape);
+        QTRY_VERIFY(!surface.isVisible());
+        QCOMPARE(hide_requests.size(), 1);
+        QVERIFY(panel->property("dirty").toBool());
+        QCOMPARE(meaning->property("text").toString(), QStringLiteral("Keep this unsaved meaning"));
+
+        controller.show_notebook();
+        QTRY_VERIFY(surface.isVisible());
+        QCOMPARE(meaning->property("text").toString(), QStringLiteral("Keep this unsaved meaning"));
+        panel->setVisible(false);
+        auto *hide_button = find_item(surface.contentItem(), QStringLiteral("hide_overlay"));
+        QVERIFY(hide_button);
+        QTest::qWait(30);
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier,
+            hide_button->mapToScene(QPointF(hide_button->width() / 2, hide_button->height() / 2)).toPoint());
+        QTRY_VERIFY(!surface.isVisible());
+        QCOMPARE(hide_requests.size(), 2);
+        QCOMPARE(backend.capture_count, 0);
+        QCOMPARE(warnings.size(), 0);
+    }
+
+    void capture_respects_latest_visibility() {
+        showthis::ShoWSurface surface;
+        surface.set_languages({QStringLiteral("eng")});
+        TestCaptureBackend backend;
+        std::atomic<int> scans{0};
+        showthis::OverlayController controller(surface, backend,
+            [&](const QImage &, const QString &) {
+                ++scans;
+                return showthis::ScanResult{};
+            });
+        QImage image(400, 300, QImage::Format_RGB32);
+        image.fill(Qt::white);
+        controller.toggle_overlay();
+        QCOMPARE(backend.capture_count, 1);
+        QVERIFY(!surface.isVisible());
+        controller.toggle_overlay(); // Hide while the first capture is pending.
+        backend.complete(image);
+        QVERIFY(!surface.isVisible());
+        QCOMPARE(scans.load(), 0);
+
+        controller.toggle_overlay();
+        controller.toggle_overlay();
+        controller.toggle_overlay(); // Show wins; the same pending capture is reused.
+        QCOMPARE(backend.capture_count, 2);
+        backend.complete(image);
+        QVERIFY(surface.isVisible());
+        controller.hide_overlay();
+        QTRY_VERIFY(!surface.scanning());
+        QVERIFY(!surface.isVisible());
+        QCOMPARE(scans.load(), 1);
+    }
+
+    void toggling_during_ocr_is_immediate() {
+        showthis::ShoWSurface surface;
+        surface.set_languages({QStringLiteral("eng")});
+        TestCaptureBackend backend;
+        QSemaphore started;
+        QSemaphore release;
+        std::atomic<int> scans{0};
+        showthis::OverlayController controller(surface, backend,
+            [&](const QImage &, const QString &) {
+                ++scans;
+                started.release();
+                release.acquire();
+                return showthis::ScanResult{};
+            });
+        const auto unblock_on_failure = qScopeGuard([&]() { release.release(10); });
+        QImage image(400, 300, QImage::Format_RGB32);
+        image.fill(Qt::white);
+        controller.toggle_overlay();
+        backend.complete(image);
+        QVERIFY(started.tryAcquire(1, 1000));
+        QVERIFY(surface.scanning());
+        for (int i = 0; i < 10; ++i) {
+            controller.toggle_overlay();
+            QVERIFY(!surface.isVisible());
+            controller.toggle_overlay();
+            QVERIFY(surface.isVisible());
+        }
+        QCOMPARE(backend.capture_count, 1);
+        QCOMPARE(scans.load(), 1);
+        controller.hide_overlay();
+        release.release();
+        QTRY_VERIFY(!surface.scanning());
+        QVERIFY(!surface.isVisible()); // Finishing OCR never reopens a hidden overlay.
+    }
+
+    void ocr_coalesces_language_changes() {
+        showthis::ShoWSurface surface;
+        surface.set_languages({QStringLiteral("eng"), QStringLiteral("deu"), QStringLiteral("ukr")});
+        surface.set_language(QStringLiteral("eng"));
+        TestCaptureBackend backend;
+        QSemaphore started;
+        QSemaphore release;
+        std::atomic<int> scans{0};
+        std::atomic<int> active{0};
+        std::atomic<bool> overlapped{false};
+        showthis::OverlayController controller(surface, backend,
+            [&](const QImage &, const QString &language) {
+                if (active.fetch_add(1) > 0) overlapped = true;
+                ++scans;
+                started.release();
+                release.acquire();
+                --active;
+                return showthis::ScanResult{{{language, QRect(1, 1, 10, 10), {}}}, {}};
+            });
+        const auto unblock_on_failure = qScopeGuard([&]() { release.release(10); });
+        QImage image(400, 300, QImage::Format_RGB32);
+        image.fill(Qt::white);
+        controller.toggle_overlay();
+        backend.complete(image);
+        QVERIFY(started.tryAcquire(1, 1000));
+        surface.set_language(QStringLiteral("deu"));
+        surface.set_language(QStringLiteral("ukr"));
+        release.release();
+        QTRY_COMPARE(scans.load(), 2);
+        QVERIFY(started.tryAcquire(1, 1000));
+        QVERIFY(surface.words().isEmpty()); // The obsolete English result was not published.
+        release.release();
+        QTRY_VERIFY(!surface.scanning());
+        QCOMPARE(surface.words().size(), 1);
+        QCOMPARE(surface.words()[0].toMap().value("text").toString(), QStringLiteral("ukr"));
+        QVERIFY(!overlapped.load());
+        QCOMPARE(backend.capture_count, 1);
+        controller.hide_overlay();
+    }
+
+    void capture_failure_is_recoverable() {
+        showthis::ShoWSurface surface;
+        surface.set_languages({QStringLiteral("eng")});
+        TestCaptureBackend backend;
+        showthis::OverlayController controller(surface, backend,
+            [](const QImage &, const QString &) { return showthis::ScanResult{}; });
+        controller.toggle_overlay();
+        backend.fail(QStringLiteral("Temporary capture failure"));
+        QCOMPARE(surface.error(), QStringLiteral("Temporary capture failure"));
+        QVERIFY(surface.isVisible());
+        controller.toggle_overlay();
+        controller.toggle_overlay();
+        QCOMPARE(backend.capture_count, 2);
+        QImage image(400, 300, QImage::Format_RGB32);
+        image.fill(Qt::white);
+        backend.complete(image);
+        QTRY_VERIFY(!surface.scanning());
+        QVERIFY(surface.error().isEmpty());
+        controller.hide_overlay();
+    }
+
+    void ocr_failure_is_recoverable() {
+        showthis::ShoWSurface surface;
+        surface.set_languages({QStringLiteral("eng")});
+        TestCaptureBackend backend;
+        std::atomic<int> scans{0};
+        showthis::OverlayController controller(surface, backend,
+            [&](const QImage &, const QString &) {
+                if (++scans == 1)
+                    throw std::runtime_error("Simulated OCR failure");
+                return showthis::ScanResult{};
+            });
+        QImage image(400, 300, QImage::Format_RGB32);
+        image.fill(Qt::white);
+        controller.toggle_overlay();
+        backend.complete(image);
+        QTRY_VERIFY(!surface.scanning());
+        QCOMPARE(surface.error(), QStringLiteral("Simulated OCR failure"));
+        QVERIFY(surface.isVisible());
+        surface.hide(); // A native hide must not consume the next show request.
+        controller.toggle_overlay();
+        QCOMPARE(backend.capture_count, 2);
+        backend.complete(image);
+        QTRY_VERIFY(!surface.scanning());
+        QVERIFY(surface.isVisible());
+        QVERIFY(surface.error().isEmpty());
+        QCOMPARE(scans.load(), 2);
+        controller.hide_overlay();
+    }
+
+    void word_outlines_checkbox() {
         showthis::ShoWSurface surface;
         QCOMPARE(surface.status(), QQuickView::Ready);
         QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
@@ -476,7 +816,7 @@ private slots:
         QVERIFY(radio);
         QVERIFY(word);
         QVERIFY(radio->property("checked").toBool());
-        QVERIFY(!radio->property("autoExclusive").toBool());
+        QVERIFY(QString::fromLatin1(radio->metaObject()->className()).contains(QStringLiteral("CheckBox")));
         auto *border = word->property("border").value<QObject *>();
         QVERIFY(border);
         QCOMPARE(border->property("width").toInt(), 1);

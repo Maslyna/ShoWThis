@@ -30,6 +30,7 @@ qt_add_executable(ShoWThis
     src/OcrEngine.h src/OcrEngine.cpp
     src/AppSettings.h src/AppSettings.cpp
     src/LearningService.h src/LearningService.cpp
+    src/OverlayController.h src/OverlayController.cpp
     ${SHOWTHIS_QML_RESOURCES}
 )
 
@@ -73,10 +74,12 @@ if(BUILD_TESTING)
         src/ShoWSurface.h src/ShoWSurface.cpp
         src/AppSettings.h src/AppSettings.cpp
         src/LearningService.h src/LearningService.cpp
+        src/OverlayController.h src/OverlayController.cpp
+        src/AScreenCaptureBackend.h src/AScreenCaptureBackend.cpp
         ${SHOWTHIS_QML_RESOURCES}
     )
     target_include_directories(OverlayTest PRIVATE src)
-    target_link_libraries(OverlayTest PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Test Qt6::Network)
+    target_link_libraries(OverlayTest PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Test Qt6::Network Qt6::Concurrent)
     add_test(NAME OverlayTest COMMAND OverlayTest)
     set_tests_properties(OverlayTest PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software"

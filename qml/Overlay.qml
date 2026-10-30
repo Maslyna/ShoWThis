@@ -4,6 +4,8 @@ import QtQuick.Layouts
 
 Item {
     id: root
+    focus: true
+    Keys.onEscapePressed: overlay.hide_requested()
     width: 1280
     height: 720
 
@@ -47,6 +49,7 @@ Item {
         function onVisibleChanged() {
             root.clearHover()
             languagePopup.close()
+            if (overlay.visible) root.forceActiveFocus()
         }
     }
 
@@ -258,11 +261,10 @@ Item {
                 elide: Text.ElideRight
             }
 
-            RadioButton {
+            CheckBox {
                 id: highlightsButton
                 objectName: "word_outlines"
                 text: root.width < 640 ? qsTr("Boxes") : qsTr("Word outlines")
-                autoExclusive: false
                 checked: true
                 palette.windowText: systemPalette.windowText
                 palette.buttonText: systemPalette.buttonText
@@ -284,12 +286,13 @@ Item {
             }
 
             NotebookButton {
-                text: "✕"
+                objectName: "hide_overlay"
+                text: qsTr("Hide")
                 quiet: true
-                Accessible.name: qsTr("Close screen overlay")
+                Accessible.name: qsTr("Hide overlay")
                 ToolTip.visible: hovered
-                ToolTip.text: qsTr("Close screen overlay")
-                onClicked: overlay.closeRequested()
+                ToolTip.text: qsTr("Hide overlay · Esc\nThe app keeps running in the tray.")
+                onClicked: overlay.hide_requested()
             }
         }
     }
@@ -298,7 +301,7 @@ Item {
         id: languagePopup
         objectName: "languagePopup"
         parent: root
-        property var draftLanguages: []
+        property var draft_languages: []
         width: Math.max(0, Math.min(320, root.width - 24))
         height: Math.min(implicitHeight, root.height - 24)
         x: root.bounded(toolbar.x + 44, root.width - width - 12)
@@ -307,18 +310,18 @@ Item {
         padding: 16
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         onAboutToShow: {
-            draftLanguages = root.selectedLanguages.slice()
+            draft_languages = root.selectedLanguages.slice()
             root.clearHover()
         }
 
-        function toggleLanguage(code: string, selected: bool) {
-            let draft = draftLanguages.slice()
+        function toggle_language(code: string, selected: bool) {
+            let draft = draft_languages.slice()
             const index = draft.indexOf(code)
             if (selected && index < 0)
                 draft.push(code)
-            else if (!selected && index >= 0 && draft.length > 1)
+            else if (!selected && index >= 0)
                 draft.splice(index, 1)
-            draftLanguages = draft
+            draft_languages = draft
         }
 
         background: Rectangle {
@@ -337,7 +340,7 @@ Item {
             }
 
             Label {
-                text: qsTr("Select one or more installed languages.")
+                text: qsTr("Select any installed languages. Choose at least one before applying.")
                 color: systemPalette.windowText
                 opacity: 0.7
                 wrapMode: Text.WordWrap
@@ -363,9 +366,10 @@ Item {
                             objectName: "languageChoice_" + modelData
                             width: languageChoices.width
                             text: root.languageLabel(modelData)
-                            checked: languagePopup.draftLanguages.indexOf(modelData) >= 0
-                            enabled: !overlay.scanning && !(checked && languagePopup.draftLanguages.length === 1)
-                            onClicked: languagePopup.toggleLanguage(modelData, checked)
+                            autoExclusive: false
+                            checked: languagePopup.draft_languages.indexOf(modelData) >= 0
+                            enabled: !overlay.scanning
+                            onClicked: languagePopup.toggle_language(modelData, checked)
                         }
                     }
                 }
@@ -388,9 +392,10 @@ Item {
                     objectName: "applyLanguages"
                     text: qsTr("Apply")
                     primary: true
-                    enabled: !overlay.scanning && languagePopup.draftLanguages.length > 0
+                    enabled: !overlay.scanning && languagePopup.draft_languages.length > 0
                     onClicked: {
-                        overlay.selectedLanguage = languagePopup.draftLanguages.join("+")
+                        if (languagePopup.draft_languages.length === 0) return
+                        overlay.selectedLanguage = languagePopup.draft_languages.join("+")
                         languagePopup.close()
                     }
                 }

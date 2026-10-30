@@ -18,9 +18,10 @@ private slots:
     void history_disabled_and_cleared();
     void legacy_history_migration();
     void anki_export();
-    void german_articles_data();
-    void german_articles();
+    void dictionary_grammar_data();
+    void dictionary_grammar();
     void article_persistence_and_legacy_cards();
+    void flexible_languages();
 
 private:
     QTemporaryDir m_settings_directory;

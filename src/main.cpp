@@ -1,19 +1,12 @@
 #include <LayerShellQt/Window>
 
 #include <QApplication>
-#include <QColorTransform>
 #include <QDBusConnection>
 #include <QDebug>
 #include <QFile>
-#include <QFutureWatcher>
-#include <QLabel>
 #include <QMenu>
-#include <QScreen>
 #include <QString>
 #include <QSystemTrayIcon>
-#include <QTimer>
-#include <QQuickItem>
-#include <QtConcurrent/QtConcurrent>
 #include <QtLogging>
 
 #include "GlobalShortcutPortal.h"
@@ -21,6 +14,7 @@
 #include "KWinScreenCaptureBackend.h"
 #include "ShoWSurface.h"
 #include "ShoWThisConstants.h"
+#include "OverlayController.h"
 
 void register_host_app() {
     // The Registry interface only exists for unsandboxed ("host") apps.
@@ -88,17 +82,23 @@ int main(int argc, char *argv[]) {
 
     layerShell->setDesiredSize(QSize{0, 0});
 
-    layerShell->setKeyboardInteractivity(LayerShellQt::Window::KeyboardInteractivityOnDemand);
+    // The full-screen overlay needs Escape immediately, without requiring a
+    // mouse click first. Hiding the layer releases keyboard focus to the desktop.
+    layerShell->setKeyboardInteractivity(LayerShellQt::Window::KeyboardInteractivityExclusive);
 
     layerShell->setWantsToBeOnActiveScreen(true);
+
+    showthis::OverlayController controller(w, backend,
+        [&ocr_engine](const QImage &image, const QString &language) {
+            ocr_engine.set_languages(language);
+            return showthis::ScanResult{ocr_engine.scan_image(image), {}};
+        });
 
     QSystemTrayIcon tray(QIcon::fromTheme("edit-find"));
     QMenu menu;
     QAction *vocabulary_action = menu.addAction("My vocabulary");
-    QObject::connect(vocabulary_action, &QAction::triggered, &app, [&]() {
-        w.show();
-        QMetaObject::invokeMethod(w.rootObject(), "open_vocabulary");
-    });
+    QObject::connect(vocabulary_action, &QAction::triggered,
+        &controller, &showthis::OverlayController::show_notebook);
     QAction *quitAction = menu.addAction("Quit");
 
     QObject::connect(quitAction, &QAction::triggered, &app, &QApplication::quit);
@@ -106,76 +106,17 @@ int main(int argc, char *argv[]) {
     tray.setToolTip("Screen Translator (running)");
     tray.show();
 
-    struct ScanResult {
-        QList<showthis::ocr::WordBox> words;
-        QString error;
-    };
-    bool busy = false;  // GUI thread only
-    QImage screenshot;
-    QFuture<ScanResult> pending;  // for shutdown
-
-    const auto scan = [&]() {
-        busy = true;
-        w.set_scanning(true);
-        w.set_error({});
-        w.set_words({});
-        auto *watcher = new QFutureWatcher<ScanResult>(&app);
-        QObject::connect(watcher, &QFutureWatcherBase::finished, &app, [&, watcher]() {
-            const auto result = watcher->result();
-            w.set_words(result.words);
-            w.set_error(result.error);
-            w.set_scanning(false);
-            watcher->deleteLater();
-            busy = false;  // allow the next capture
-        });
-
-        pending = QtConcurrent::run([&ocr_engine, owned = screenshot, language = w.language()]() {
-            ScanResult result;
-            try {
-                ocr_engine.set_languages(language);
-                result.words = ocr_engine.scan_image(owned);
-            } catch (const std::exception &ex) {
-                qCritical() << ex.what();
-                result.error = QString::fromUtf8(ex.what());
-            }
-            return result;
-        });
-        watcher->setFuture(pending);
-    };
-
-    QObject::connect(&backend, &showthis::AScreenCaptureBackend::captured, [&](const QImage &img) {
-        screenshot = img.copy();
-        w.set_image(screenshot);
-        scan();
-        w.setVisible(true);
-    });
-
     QObject::connect(&w, &showthis::ShoWSurface::selectedLanguageChanged, &app, [&]() {
         settings.set_ocr_language(w.language());
-        if (!busy && !screenshot.isNull())
-            scan();
     });
-    QObject::connect(&w, &showthis::ShoWSurface::closeRequested, &app, [&]() { w.hide(); });
-
-    QObject::connect(
-        &backend, &showthis::AScreenCaptureBackend::capture_failed, [&](const QString &reason) {
-            qWarning() << "capture failed:" << reason;
-            busy = false;
-            app.exit(1);
-        });
 
     // Don't let the engine be destroyed under a running scan.
-    QObject::connect(&app, &QCoreApplication::aboutToQuit, [&]() { pending.waitForFinished(); });
+    QObject::connect(&app, &QCoreApplication::aboutToQuit,
+        &controller, &showthis::OverlayController::wait_for_finished);
 
     QObject::connect(&portal, &showthis::GlobalShortcutPortal::shortcut_activated, [&](const QString &id) {
-        qDebug() << "Got shortcut:" << id;
-
-        if (w.isVisible()) {
-            w.setVisible(false);
-        } else if (!busy) {
-            busy = true;
-            backend.capture();
-        }
+        if (id == QStringLiteral("toggle-window"))
+            controller.toggle_overlay();
     });
     portal.start();
 
