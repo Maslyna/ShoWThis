@@ -21,6 +21,9 @@ qt_add_library(showthis_core STATIC
     src/LearningStore.h src/LearningStore.cpp
     src/NotebookData.h src/NotebookData.cpp
     src/AnkiExporter.h src/AnkiExporter.cpp
+    src/TranslationProvider.h src/TranslationProviders.cpp
+    src/TranslationService.h src/TranslationService.cpp
+    src/DeepLTranslator.h src/DeepLTranslator.cpp
 )
 target_include_directories(showthis_core PUBLIC src)
 target_link_libraries(showthis_core PUBLIC Qt6::Core Qt6::Network)
@@ -80,4 +83,8 @@ if(BUILD_TESTING)
     qt_add_executable(LearningStoreTest tests/LearningStoreTest.cpp)
     target_link_libraries(LearningStoreTest PRIVATE showthis_core Qt6::Test)
     add_test(NAME LearningStoreTest COMMAND LearningStoreTest)
+
+    qt_add_executable(TranslationServiceTest tests/TranslationServiceTest.cpp)
+    target_link_libraries(TranslationServiceTest PRIVATE showthis_core Qt6::Test)
+    add_test(NAME TranslationServiceTest COMMAND TranslationServiceTest)
 endif()

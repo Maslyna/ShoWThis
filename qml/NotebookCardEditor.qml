@@ -9,13 +9,12 @@ NotebookSurface {
     required property string card_id
     required property bool dirty
     required property bool wide_layout
-    readonly property bool busy: service.dictionary_busy || service.translation_busy
+    readonly property bool busy: service.dictionary_busy || service.translator.busy
     property alias word_prefix: prefix.text
     property alias meaning: meaning_input.text
     property alias translation: translation_input.text
     property alias notes: notes_input.text
     signal edited()
-    signal settings_requested()
     signal translation_language_changed()
     signal translate_requested()
     objectName: "personal_card_pane"
@@ -23,7 +22,7 @@ NotebookSurface {
     function load(card) {
         word_prefix = card.article || ""
         meaning = card.meaning || ""
-        translation = card.translation || ""
+        translation = service.translator.configured ? card.translation || "" : ""
         notes = card.notes || ""
         notes_toggle.checked = notes.length > 0
         scroll.contentItem.contentY = 0
@@ -88,6 +87,7 @@ NotebookSurface {
                     onTextChanged: form.edited()
                 }
                 RowLayout {
+                    visible: form.service.translator.configured
                     Layout.fillWidth: true
                     Label { text: qsTr("Translation"); font.bold: true; font.pixelSize: 12; Layout.fillWidth: true }
                     NotebookLanguagePicker {
@@ -107,28 +107,30 @@ NotebookSurface {
                 TextArea {
                     id: translation_input
                     objectName: "word_translation"
+                    visible: form.service.translator.configured
                     Layout.fillWidth: true
                     font.pixelSize: 19
                     wrapMode: TextEdit.Wrap
                     textFormat: TextEdit.PlainText
                     selectByMouse: true
-                    enabled: !form.service.translation_busy
+                    enabled: !form.service.translator.busy
                     placeholderText: qsTr("A translation in your language…")
                     Accessible.name: qsTr("Word translation")
                     onTextChanged: form.edited()
                 }
                 NotebookButton {
-                    text: form.service.has_translation_key
-                        ? (form.service.translation_busy ? qsTr("Translating…") : qsTr("Translate with context")) : qsTr("Set up DeepL translation ↗")
+                    objectName: "translate_word"
+                    visible: form.service.translator.configured
+                    text: form.service.translator.busy ? qsTr("Translating…")
+                        : qsTr("Translate with %1").arg(form.service.translator.provider_name)
                     quiet: true
                     Layout.fillWidth: true
-                    enabled: !form.busy && (form.word.trim().length > 0 || !form.service.has_translation_key)
-                    onClicked: {
-                        if (!form.service.has_translation_key) form.settings_requested()
-                        else form.translate_requested()
-                    }
+                    enabled: !form.busy && form.word.trim().length > 0
+                    onClicked: form.translate_requested()
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("Only clicking Translate sends your word and original sentence to DeepL")
+                    ToolTip.text: form.service.translator.supports_context
+                        ? qsTr("Only clicking Translate sends your word and sentence to %1").arg(form.service.translator.provider_name)
+                        : qsTr("Only clicking Translate sends your word to %1").arg(form.service.translator.provider_name)
                 }
                 NotebookButton {
                     id: notes_toggle

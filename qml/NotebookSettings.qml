@@ -62,70 +62,9 @@ ScrollView {
             }
         }
 
-        NotebookSurface {
+        NotebookTranslatorSettings {
+            translator: settings_page.service.translator
             Layout.fillWidth: true
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 12
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: qsTr("Contextual translation"); font.pixelSize: 17; font.bold: true; Layout.fillWidth: true }
-                    Label {
-                        text: settings_page.service.has_translation_key ? qsTr("● Ready") : qsTr("Optional")
-                        color: settings_page.service.has_translation_key ? settings_page.palette.highlight : settings_page.palette.text
-                        opacity: 0.7
-                    }
-                }
-                Label {
-                    text: qsTr("Use your own DeepL API key to translate words using the surrounding sentence. Dictionary lookup works without it.")
-                    opacity: 0.65
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-                ComboBox {
-                    model: ["DeepL API Free", "DeepL API Pro"]
-                    currentIndex: settings_page.service.deepl_pro ? 1 : 0
-                    onActivated: settings_page.service.deepl_pro = currentIndex === 1
-                    Layout.fillWidth: true
-                    Accessible.name: qsTr("DeepL API plan")
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    TextField {
-                        id: api_key_input
-                        echoMode: TextInput.Password
-                        placeholderText: qsTr("API key · this session only")
-                        Layout.fillWidth: true
-                        Layout.minimumWidth: 0
-                        Accessible.name: qsTr("DeepL API key")
-                        onAccepted: if (text.trim().length > 0) {
-                            settings_page.service.set_translation_key(text)
-                            clear()
-                        }
-                    }
-                    NotebookButton {
-                        text: qsTr("Use key")
-                        enabled: api_key_input.text.trim().length > 0
-                        onClicked: {
-                            settings_page.service.set_translation_key(api_key_input.text)
-                            api_key_input.clear()
-                        }
-                    }
-                    NotebookButton {
-                        text: qsTr("Forget")
-                        quiet: true
-                        visible: settings_page.service.has_translation_key
-                        onClicked: settings_page.service.set_translation_key("")
-                    }
-                }
-                Label {
-                    text: qsTr("Only pressing Translate sends your word and context. Keys are never stored in your notebook or settings. SHOWTHIS_DEEPL_API_KEY is also supported.")
-                    wrapMode: Text.WordWrap
-                    opacity: 0.6
-                    font.pixelSize: 12
-                    Layout.fillWidth: true
-                }
-            }
         }
 
         NotebookSurface {

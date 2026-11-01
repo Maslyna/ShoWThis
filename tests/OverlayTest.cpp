@@ -17,6 +17,7 @@
 #include "LearningService.h"
 #include "OverlayController.h"
 #include "AScreenCaptureBackend.h"
+#include "TestNetwork.h"
 
 class TestCaptureBackend : public showthis::AScreenCaptureBackend {
 public:
@@ -50,17 +51,20 @@ private slots:
 
     void init() {
         QSettings{}.clear();
-        qunsetenv("SHOWTHIS_DEEPL_API_KEY");
     }
 
     void word_card_context_data() {
         QTest::addColumn<QSize>("size");
-        QTest::newRow("desktop") << QSize(1000, 700);
-        QTest::newRow("compact") << QSize(640, 700);
+        QTest::addColumn<bool>("translator_configured");
+        QTest::newRow("desktop-dictionary-only") << QSize(1000, 700) << false;
+        QTest::newRow("compact-dictionary-only") << QSize(640, 700) << false;
+        QTest::newRow("desktop-with-translator") << QSize(1000, 700) << true;
+        QTest::newRow("compact-with-translator") << QSize(640, 700) << true;
     }
 
     void word_card_context() {
         QFETCH(QSize, size);
+        QFETCH(bool, translator_configured);
         QTemporaryDir directory;
         QFile fixture(QFINDTESTDATA("fixtures/dictionary-de-Haus.json"));
         QVERIFY(fixture.open(QIODevice::ReadOnly));
@@ -73,6 +77,10 @@ private slots:
         showthis::LearningService service(nullptr, store.fileName());
         service.set_source_language(QStringLiteral("de"));
         service.set_target_language(QStringLiteral("uk"));
+        if (translator_configured) {
+            service.translator()->set_provider_id(QStringLiteral("deepl"));
+            service.translator()->set_option(QStringLiteral("api_key"), QStringLiteral("test-key"));
+        }
         showthis::ShoWSurface surface(nullptr, &service);
         QCOMPARE(surface.status(), QQuickView::Ready);
         QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
@@ -113,7 +121,8 @@ private slots:
         QTRY_COMPARE(meaning->property("text").toString(), QStringLiteral("house"));
         if (!panel->property("wide_layout").toBool())
             QCOMPARE(panel->property("compact_page").toInt(), 1);
-        QCOMPARE(translation->property("text").toString(), QString::fromUtf8("будинок"));
+        QCOMPARE(translation->property("text").toString(), translator_configured ? QString::fromUtf8("будинок") : QString{});
+        QCOMPARE(translation->isVisible(), translator_configured);
         QCOMPARE(panel->property("word_prefix").toString(), QString{});
         auto *article = find_item(surface.contentItem(), QStringLiteral("word_prefix"));
         auto *headword = find_item(surface.contentItem(), QStringLiteral("word_headword"));
@@ -353,9 +362,88 @@ private slots:
         QCOMPARE(warnings.size(), 0);
     }
 
+    void translator_configuration_controls_the_word_card() {
+        QTemporaryDir directory;
+        TestNetwork network;
+        network.response = R"({"translations":[{"text":"дом"}]})";
+        showthis::LearningService service(nullptr, directory.filePath(QStringLiteral("words.json")), &network);
+        showthis::ShoWSurface surface(nullptr, &service);
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
+        surface.resize(1100, 800);
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        auto *panel = find_item(surface.contentItem(), QStringLiteral("learning_panel"));
+        QVERIFY(panel);
+        QVERIFY(QMetaObject::invokeMethod(panel, "open_word", Q_ARG(QString, QStringLiteral("Haus")),
+            Q_ARG(QString, QStringLiteral("Das ist ein Haus."))));
+        auto *translation = find_item(surface.contentItem(), QStringLiteral("word_translation"));
+        auto *target = find_item(surface.contentItem(), QStringLiteral("target_language"));
+        auto *translate = find_item(surface.contentItem(), QStringLiteral("translate_word"));
+        auto *save = find_item(surface.contentItem(), QStringLiteral("save_word"));
+        auto *meaning = find_item(surface.contentItem(), QStringLiteral("word_meaning"));
+        auto *navigation = find_item(surface.contentItem(), QStringLiteral("notebook_tabs"));
+        QVERIFY(translation);
+        QVERIFY(target);
+        QVERIFY(translate);
+        QVERIFY(save);
+        QVERIFY(meaning);
+        QVERIFY(navigation);
+        QVERIFY(!translation->isVisible());
+        QVERIFY(!target->isVisible());
+        QVERIFY(!translate->isVisible());
+        QVERIFY(!save->isEnabled());
+
+        navigation->setProperty("current_index", 3);
+        auto *provider = find_item(surface.contentItem(), QStringLiteral("translation_provider"));
+        QVERIFY(provider);
+        QCOMPARE(provider->property("currentIndex").toInt(), 0);
+        provider->setProperty("currentIndex", 1);
+        QVERIFY(QMetaObject::invokeMethod(provider, "activated", Q_ARG(int, 1)));
+        QCOMPARE(service.translator()->provider_id(), QString("deepl"));
+        QVERIFY(!service.translator()->configured());
+        navigation->setProperty("current_index", 0);
+        QVERIFY(!translation->isVisible());
+
+        navigation->setProperty("current_index", 3);
+        QTRY_VERIFY(find_item(surface.contentItem(), QStringLiteral("translator_input_api_key")));
+        auto *key = find_item(surface.contentItem(), QStringLiteral("translator_input_api_key"));
+        auto *apply = find_item(surface.contentItem(), QStringLiteral("apply_translator_api_key"));
+        QVERIFY(apply);
+        key->setProperty("text", QStringLiteral("private-test-key"));
+        QVERIFY(QMetaObject::invokeMethod(apply, "clicked"));
+        QVERIFY(service.translator()->configured());
+        QVERIFY(key->property("text").toString().isEmpty());
+        navigation->setProperty("current_index", 0);
+        QTRY_VERIFY(translation->isVisible());
+        QVERIFY(target->isVisible());
+        QVERIFY(translate->isVisible());
+        QVERIFY(translate->property("text").toString().contains(QStringLiteral("DeepL")));
+        QVERIFY(network.requests.isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(translate, "clicked"));
+        QTRY_COMPARE(translation->property("text").toString(), QString::fromUtf8("дом"));
+        QCOMPARE(network.requests.size(), 1);
+        QTRY_VERIFY(save->isEnabled());
+
+        service.translator()->forget_credentials();
+        QTRY_VERIFY(!translation->isVisible());
+        QVERIFY(!target->isVisible());
+        QVERIFY(!translate->isVisible());
+        QVERIFY(translation->property("text").toString().isEmpty());
+        QVERIFY(!save->isEnabled());
+        meaning->setProperty("text", QStringLiteral("house"));
+        QVERIFY(save->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+        QCOMPARE(service.vocabulary().size(), 1);
+        QVERIFY(service.vocabulary()[0].toMap().value("translation").toString().isEmpty());
+        QCOMPARE(warnings.size(), 0);
+    }
+
     void flexible_language_controls() {
         QTemporaryDir directory;
         showthis::LearningService service(nullptr, directory.filePath(QStringLiteral("words.json")));
+        service.translator()->set_provider_id(QStringLiteral("deepl"));
+        service.translator()->set_option(QStringLiteral("api_key"), QStringLiteral("test-key"));
         showthis::ShoWSurface surface(nullptr, &service);
         QCOMPARE(surface.status(), QQuickView::Ready);
         QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);

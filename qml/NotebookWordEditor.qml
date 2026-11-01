@@ -15,14 +15,13 @@ ColumnLayout {
     property bool context_expanded: false
     property bool lookup_attempted: false
     property alias word_prefix: card_form.word_prefix
-    readonly property bool busy: service.dictionary_busy || service.translation_busy
+    readonly property bool busy: service.dictionary_busy || service.translator.busy
     readonly property var active_source: service.source.url ? service.source : saved_source
     readonly property var current_sense: selected_sense >= 0 && selected_sense < service.senses.length
         ? service.senses[selected_sense] : ({})
     readonly property bool can_save: !busy && word_input.text.trim().length > 0
-        && (card_form.meaning.trim().length > 0 || card_form.translation.trim().length > 0)
+        && (card_form.meaning.trim().length > 0 || (service.translator.configured && card_form.translation.trim().length > 0))
         && (card_id.length === 0 || dirty)
-    signal settings_requested()
     spacing: 10
 
     function mark_dirty() { if (!loading) dirty = true }
@@ -68,6 +67,7 @@ ColumnLayout {
         service.lookup(word_input.text, context_input.text)
     }
     function native_translation(sense): string {
+        if (!service.translator.configured) return ""
         return (sense.translations || []).filter(function(item) {
             return item.language.code === editor.service.target_language
         }).map(function(item) { return item.word }).join(", ")
@@ -83,7 +83,8 @@ ColumnLayout {
     function save_card() {
         if (!can_save) return
         if (service.save_word(card_id, word_input.text, context_input.text,
-                card_form.meaning, card_form.translation, card_form.notes, selected_sense, card_form.word_prefix)) {
+                card_form.meaning, service.translator.configured ? card_form.translation : "",
+                card_form.notes, selected_sense, card_form.word_prefix)) {
             if (card_id.length === 0) card_id = service.vocabulary[0].id
             dirty = false
         }
@@ -92,11 +93,17 @@ ColumnLayout {
     Connections {
         target: editor.service
         function onLookup_changed() { editor.selected_sense = -1 }
-        function onTranslation_changed() {
-            if (editor.service.translation.length > 0) {
-                card_form.translation = editor.service.translation
-                editor.mark_dirty()
-            }
+    }
+    Connections {
+        target: editor.service.translator
+        function onTranslated(text) {
+            card_form.translation = text
+            editor.mark_dirty()
+        }
+        function onConfiguration_changed() {
+            // Never save hidden translations or allow old provider results to
+            // survive a configuration change.
+            card_form.translation = ""
         }
     }
 
@@ -183,7 +190,7 @@ ColumnLayout {
                         textFormat: TextEdit.PlainText
                         wrapMode: TextEdit.Wrap
                         selectByMouse: true
-                        enabled: !editor.service.translation_busy
+                        enabled: !editor.service.translator.busy
                         Accessible.name: qsTr("Original sentence")
                         onTextChanged: editor.mark_dirty()
                     }
@@ -251,7 +258,6 @@ ColumnLayout {
                     Layout.preferredWidth: 1
                     Layout.preferredHeight: parent.card_height
                     onEdited: editor.mark_dirty()
-                    onSettings_requested: editor.settings_requested()
                     onTranslation_language_changed: {
                         translation = editor.native_translation(editor.current_sense)
                         editor.mark_dirty()
@@ -266,7 +272,8 @@ ColumnLayout {
         Label {
             text: word_input.text.trim().length === 0 ? qsTr("Start with a word above.")
                 : card_form.meaning.trim().length === 0 && card_form.translation.trim().length === 0
-                    ? qsTr("Choose a meaning or add a translation to save.")
+                    ? (editor.service.translator.configured ? qsTr("Choose a meaning or add a translation to save.")
+                        : qsTr("Choose a meaning to save."))
                 : editor.card_id.length > 0 && !editor.dirty ? qsTr("✓ In your collection")
                 : qsTr("Ready to save · Ctrl+S")
             opacity: 0.6

@@ -3,7 +3,6 @@
 #include "NotebookData.h"
 
 #include <QDateTime>
-#include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -29,10 +28,6 @@ QString request_error(QNetworkReply *reply, const QString &service) {
         return QObject::tr("%1 rate limit reached. Please try again later.").arg(service);
     if (status == 400)
         return QObject::tr("%1 rejected the request. Check the language codes and whether this language pair is supported.").arg(service);
-    if (status == 403)
-        return QObject::tr("DeepL rejected the API key. Check the key and Free/Pro selection.");
-    if (status == 456)
-        return QObject::tr("DeepL quota exhausted.");
     return QObject::tr("%1 request failed (%2). Check your connection or try again later.")
         .arg(service).arg(status);
 }
@@ -42,7 +37,10 @@ QString request_error(QNetworkReply *reply, const QString &service) {
 LearningService::LearningService(QObject *parent, const QString &file_name,
                                  QNetworkAccessManager *network)
     : QObject(parent), m_network(network ? network : new QNetworkAccessManager(this)),
+      m_translator(new TranslationService(this, m_network)),
       m_store(file_name) {
+    connect(m_translator, &TranslationService::error_occurred, this, &LearningService::set_message);
+    connect(m_translator, &TranslationService::configuration_changed, this, [this]() { set_message({}); });
     m_source_language = normalized_language_code(m_settings.value("learning/source_language", "en").toString());
     if (m_source_language.isEmpty())
         m_source_language = "en";
@@ -50,8 +48,6 @@ LearningService::LearningService(QObject *parent, const QString &file_name,
         QLocale::languageToCode(QLocale::system().language())).toString());
     if (m_target_language.isEmpty())
         m_target_language = "en";
-    m_deepl_pro = m_settings.value("learning/deepl_pro", false).toBool();
-    m_api_key = qEnvironmentVariable("SHOWTHIS_DEEPL_API_KEY").trimmed();
     m_history_limit = qBound(0, m_settings.value("learning/history_limit", 1000).toInt(), 10000);
 
     const auto contents = m_store.load(m_history_limit);
@@ -77,14 +73,12 @@ void LearningService::cancel(QPointer<QNetworkReply> &reply) {
 
 void LearningService::clear() {
     cancel(m_dictionary_reply);
-    cancel(m_translation_reply);
+    m_translator->clear();
     m_senses.clear();
     m_source.clear();
     m_lookup_word.clear();
-    m_translation.clear();
     set_message({});
     emit lookup_changed();
-    emit translation_changed();
 }
 
 QVariantList LearningService::language_options() const {
@@ -133,22 +127,7 @@ void LearningService::set_target_language(const QString &language) {
         return;
     m_target_language = code;
     m_settings.setValue("learning/target_language", code);
-    cancel(m_translation_reply);
-    m_translation.clear();
-    emit translation_changed();
-    emit preferences_changed();
-}
-
-void LearningService::set_deepl_pro(bool pro) {
-    if (m_deepl_pro == pro)
-        return;
-    m_deepl_pro = pro;
-    m_settings.setValue("learning/deepl_pro", pro);
-    emit preferences_changed();
-}
-
-void LearningService::set_translation_key(const QString &key) {
-    m_api_key = key.trimmed();
+    m_translator->clear();
     emit preferences_changed();
 }
 
@@ -264,46 +243,8 @@ void LearningService::lookup(const QString &word, const QString &context) {
 }
 
 void LearningService::translate(const QString &word, const QString &context) {
-    cancel(m_translation_reply);
-    m_translation.clear();
-    emit translation_changed();
-    if (m_api_key.isEmpty() || word.trimmed().isEmpty()) {
-        set_message(tr("Enter a word and configure your DeepL API key first."));
-        return;
-    }
     set_message({});
-    const QUrl url(m_deepl_pro ? "https://api.deepl.com/v2/translate"
-                              : "https://api-free.deepl.com/v2/translate");
-    QNetworkRequest request(url);
-    request.setTransferTimeout(15000);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    request.setRawHeader("Authorization", "DeepL-Auth-Key " + m_api_key.toUtf8());
-    const QJsonObject payload{{"text", QJsonArray{word.trimmed()}},
-                              {"source_lang", m_source_language.toUpper()},
-                              {"target_lang", m_target_language.toUpper()},
-                              {"context", context.trimmed()}};
-    auto *reply = m_network->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-    m_translation_reply = reply;
-    emit translation_changed();
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        if (m_translation_reply != reply) {
-            reply->deleteLater();
-            return;
-        }
-        m_translation_reply.clear();
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            set_message(request_error(reply, tr("DeepL")));
-        } else {
-            const auto data = QJsonDocument::fromJson(reply->readAll()).object();
-            const auto translations = data.value("translations").toArray();
-            m_translation = translations.isEmpty() ? QString{}
-                : translations.first().toObject().value("text").toString();
-            if (m_translation.isEmpty())
-                set_message(tr("DeepL returned no translation."));
-        }
-        emit translation_changed();
-    });
+    m_translator->translate(word, context, m_source_language, m_target_language);
 }
 
 bool LearningService::write_store(const QVariantList &cards, const QJsonObject &cache,

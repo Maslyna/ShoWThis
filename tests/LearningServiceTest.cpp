@@ -1,86 +1,14 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QNetworkReply>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
-#include <QTimer>
 #include <QtTest>
-#include <cstring>
 
 #include "LearningService.h"
 #include "LearningServiceTest.h"
-
-class TestReply : public QNetworkReply {
-public:
-    TestReply(const QNetworkRequest &request, const QByteArray &data, int status,
-              bool automatic, QObject *parent)
-        : QNetworkReply(parent), m_data(data), m_status(status) {
-        setRequest(request);
-        setUrl(request.url());
-        setAttribute(QNetworkRequest::HttpStatusCodeAttribute, status);
-        open(QIODevice::ReadOnly);
-        if (automatic)
-            QTimer::singleShot(0, this, [this]() { complete(); });
-    }
-
-    void abort() override {
-        if (isFinished())
-            return;
-        setError(QNetworkReply::OperationCanceledError, "cancelled");
-        setFinished(true);
-        emit finished();
-    }
-
-    void complete() {
-        if (isFinished())
-            return;
-        if (m_status >= 400)
-            setError(QNetworkReply::ContentAccessDenied, "test HTTP failure");
-        setFinished(true);
-        emit readyRead();
-        emit finished();
-    }
-
-    qint64 bytesAvailable() const override {
-        return m_data.size() - m_offset + QNetworkReply::bytesAvailable();
-    }
-
-protected:
-    qint64 readData(char *destination, qint64 maximum) override {
-        const auto length = qMin(maximum, qint64(m_data.size() - m_offset));
-        if (length <= 0)
-            return -1;
-        std::memcpy(destination, m_data.constData() + m_offset, size_t(length));
-        m_offset += length;
-        return length;
-    }
-
-private:
-    QByteArray m_data;
-    int m_status;
-    qint64 m_offset = 0;
-};
-
-class TestNetwork : public QNetworkAccessManager {
-public:
-    QByteArray response;
-    int status = 200;
-    bool automatic = true;
-    QList<QNetworkRequest> requests;
-    QList<QByteArray> payloads;
-    QPointer<TestReply> last_reply;
-
-protected:
-    QNetworkReply *createRequest(Operation, const QNetworkRequest &request,
-                                QIODevice *outgoing_data) override {
-        requests.append(request);
-        payloads.append(outgoing_data ? outgoing_data->readAll() : QByteArray{});
-        last_reply = new TestReply(request, response, status, automatic, this);
-        return last_reply;
-    }
-};
+#include "TestNetwork.h"
 
 static QByteArray dictionary_response() {
     QFile file(QFINDTESTDATA("fixtures/dictionary-de-Haus.json"));
@@ -149,11 +77,12 @@ static QByteArray dictionary_response() {
         showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
         service.set_source_language("de");
         service.set_target_language("uk");
-        service.set_translation_key("test-key");
-        service.set_deepl_pro(false);
+        auto *translator = service.translator();
+        translator->set_provider_id("deepl");
+        translator->set_option("api_key", "test-key");
         service.translate("Haus", "Das ist mein Haus.");
-        QTRY_VERIFY(!service.translation_busy());
-        QCOMPARE(service.translation(), QString::fromUtf8("будинок"));
+        QTRY_VERIFY(!translator->busy());
+        QCOMPARE(translator->text(), QString::fromUtf8("будинок"));
         QCOMPARE(network.requests[0].url().host(), QString("api-free.deepl.com"));
         QCOMPARE(network.requests[0].rawHeader("Authorization"), QByteArray("DeepL-Auth-Key test-key"));
         const auto payload = QJsonDocument::fromJson(network.payloads[0]).object();
@@ -161,18 +90,31 @@ static QByteArray dictionary_response() {
         QCOMPARE(payload.value("source_lang").toString(), QString("DE"));
         QCOMPARE(payload.value("target_lang").toString(), QString("UK"));
         QCOMPARE(payload.value("text").toArray()[0].toString(), QString("Haus"));
-        QVERIFY(service.save_word({}, "Haus", "Das ist mein Haus.", "house", service.translation(), "", -1));
+        QVERIFY(service.save_word({}, "Haus", "Das ist mein Haus.", "house", translator->text(), "", -1));
         QFile file(directory.filePath("words.json"));
         QVERIFY(file.open(QIODevice::ReadOnly));
         QVERIFY(!file.readAll().contains("test-key"));
 
         service.set_target_language("ru");
-        QVERIFY(service.translation().isEmpty());
-        service.set_deepl_pro(true);
+        QVERIFY(translator->text().isEmpty());
+        translator->set_option("plan", "pro");
         service.translate("Haus", "context");
-        QTRY_VERIFY(!service.translation_busy());
+        QTRY_VERIFY(!translator->busy());
         QCOMPARE(network.requests.last().url().host(), QString("api.deepl.com"));
-        service.set_translation_key("");
+
+        network.automatic = false;
+        service.translate("Haus", "context");
+        QVERIFY(translator->busy());
+        auto pending = network.last_reply;
+        service.set_target_language("fr");
+        QVERIFY(!translator->busy());
+        QVERIFY(pending->isFinished());
+        service.translate("Haus", "context");
+        pending = network.last_reply;
+        service.set_source_language("en");
+        QVERIFY(!translator->busy());
+        QVERIFY(pending->isFinished());
+        translator->forget_credentials();
         const auto requests = network.requests.size();
         service.translate("Haus", "context");
         QCOMPARE(network.requests.size(), requests);
@@ -188,6 +130,11 @@ static QByteArray dictionary_response() {
         QTRY_VERIFY(!service.dictionary_busy());
         QVERIFY(service.senses().isEmpty());
         QVERIFY(service.message().contains("rate limit"));
+
+        network.status = 403;
+        service.lookup("Haus");
+        QTRY_VERIFY(!service.dictionary_busy());
+        QVERIFY(!service.message().contains("DeepL"));
 
         network.status = 200;
         network.response = "not JSON";
@@ -212,11 +159,12 @@ static QByteArray dictionary_response() {
         QVERIFY(service.senses().isEmpty());
 
         network.automatic = true;
-        network.response = "{}";
-        service.set_translation_key("test-key");
+        network.response = R"({"translations":[]})";
+        service.translator()->set_provider_id("deepl");
+        service.translator()->set_option("api_key", "test-key");
         service.translate("test", "context");
-        QTRY_VERIFY(!service.translation_busy());
-        QVERIFY(service.translation().isEmpty());
+        QTRY_VERIFY(!service.translator()->busy());
+        QVERIFY(service.translator()->text().isEmpty());
         QVERIFY(service.message().contains("no translation"));
     }
 
@@ -240,7 +188,6 @@ QTEST_GUILESS_MAIN(LearningServiceTest)
 
 void LearningServiceTest::init() {
     QSettings{}.clear();
-    qunsetenv("SHOWTHIS_DEEPL_API_KEY");
 }
 
 void LearningServiceTest::history_limit_and_recency() {
@@ -372,7 +319,8 @@ void LearningServiceTest::anki_export() {
     network.response = dictionary_response();
     showthis::LearningService service(nullptr, path, &network);
     service.set_source_language("de");
-    service.set_translation_key("never-export-this-key");
+    service.translator()->set_provider_id("deepl");
+    service.translator()->set_option("api_key", "never-export-this-key");
     const auto empty_export = QUrl::fromLocalFile(directory.filePath("empty.txt"));
     QVERIFY(!service.export_anki(empty_export));
     QVERIFY(!QFile::exists(empty_export.toLocalFile()));

@@ -214,7 +214,6 @@ Pane {
                     id: word_editor
                     service: panel.service
                     wide_layout: panel.wide_layout
-                    onSettings_requested: navigation.current_index = 3
                 }
                 NotebookVocabulary {
                     id: vocabulary_page
