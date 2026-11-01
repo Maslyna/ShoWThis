@@ -29,7 +29,6 @@ private slots:
     }
     void init() {
         QSettings{}.clear();
-        QSettings{}.setValue("dictionary/definition_language", "en");
     }
 
     void free_dictionary_tagged_form_reference() {
@@ -77,7 +76,7 @@ private slots:
         };
         showthis::DictionaryLookup lookup(&network);
         QSignalSpy finished(&lookup, &showthis::DictionaryLookup::finished);
-        lookup.lookup("Haus", "de", {"kaikki", "ru"});
+        lookup.lookup("Haus", "de", {{{"kaikki", "ru"}}});
         QTRY_COMPARE(finished.size(), 1);
         QCOMPARE(network.requests.size(), 2);
         QCOMPARE(network.requests[0].url().path(), QString("/ruwiktionary/search/start/ha.json"));
@@ -99,7 +98,7 @@ private slots:
         };
         showthis::DictionaryLookup lookup(&network);
         QSignalSpy finished(&lookup, &showthis::DictionaryLookup::finished);
-        lookup.lookup(word, "de", {"kaikki", "en", false, false});
+        lookup.lookup(word, "de", {{{"kaikki", "en"}}, false});
         QTRY_COMPARE(finished.size(), 1);
         QCOMPARE(network.requests.size(), 3);
         QCOMPARE(network.requests[1].url().path(), QString::fromUtf8("/dictionary/search/start/häu.json"));
@@ -140,7 +139,7 @@ private slots:
         };
         showthis::DictionaryLookup lookup(&network);
         QSignalSpy finished(&lookup, &showthis::DictionaryLookup::finished);
-        lookup.lookup("Haus", "de", {"both", "ru"});
+        lookup.lookup("Haus", "de", {{{"kaikki", "ru"}, {"freedictionary", "en"}}});
         QCOMPARE(network.requests.size(), 2);
         QCOMPARE(network.requests[0].url().host(), QString("kaikki.org"));
         QCOMPARE(network.requests[1].url().host(), QString("freedictionaryapi.com"));
@@ -170,7 +169,7 @@ private slots:
         };
         showthis::DictionaryLookup lookup(&network);
         QSignalSpy finished(&lookup, &showthis::DictionaryLookup::finished);
-        lookup.lookup(word, "de", {"kaikki", "ru", true, true});
+        lookup.lookup(word, "de", {{{"kaikki", "ru"}, {"freedictionary", "en", true}}});
         QTRY_COMPARE(finished.size(), 1);
         QCOMPARE(network.requests[0].url().host(), QString("kaikki.org"));
         QCOMPARE(network.requests[1].url().host(), QString("freedictionaryapi.com"));
@@ -190,7 +189,7 @@ private slots:
         network->setParent(owner.get());
         network->automatic = false;
         auto *lookup = new showthis::DictionaryLookup(network, owner.get());
-        lookup->lookup("Haus", "de", {"both", "ru"});
+        lookup->lookup("Haus", "de", {{{"kaikki", "ru"}, {"freedictionary", "en"}}});
         QVERIFY(lookup->busy());
         owner.reset(); // The network and its replies are destroyed first.
     }
@@ -200,7 +199,7 @@ private slots:
         network.response = free_entry("Haus", "house");
         showthis::DictionaryLookup lookup(&network);
         QSignalSpy finished(&lookup, &showthis::DictionaryLookup::finished);
-        lookup.lookup("Haus", "de", {"freedictionary", "ru", true, true});
+        lookup.lookup("Haus", "de", {{{"freedictionary", "en"}, {"kaikki", "ru", true}}});
         QTRY_COMPARE(finished.size(), 1);
         QCOMPARE(network.requests.size(), 1);
     }
@@ -213,7 +212,7 @@ private slots:
         };
         showthis::DictionaryLookup lookup(&network);
         QSignalSpy finished(&lookup, &showthis::DictionaryLookup::finished);
-        lookup.lookup("Haus", "de", {"both", "ru"});
+        lookup.lookup("Haus", "de", {{{"kaikki", "ru"}, {"freedictionary", "en"}}});
         QTRY_COMPARE(finished.size(), 1);
         QCOMPARE(senses(finished).size(), 1);
         QVERIFY(finished[0][1].toString().contains("Kaikki"));
@@ -234,7 +233,7 @@ private slots:
         QCOMPARE(network.requests.size(), 2);
         finished.clear();
         network.requests.clear();
-        lookup.lookup("a", "de", {"freedictionary", "en", false, false});
+        lookup.lookup("a", "de", {{{"freedictionary", "en"}}, false});
         QTRY_COMPARE(finished.size(), 1);
         QCOMPARE(network.requests.size(), 1);
         QCOMPARE(showthis::dictionary_form_targets(result(finished), "de"), QStringList{"b"});
@@ -248,7 +247,7 @@ private slots:
         };
         showthis::DictionaryLookup lookup(&network);
         QSignalSpy finished(&lookup, &showthis::DictionaryLookup::finished);
-        lookup.lookup("old", "de", {"both", "ru"});
+        lookup.lookup("old", "de", {{{"kaikki", "ru"}, {"freedictionary", "en"}}});
         const auto old = network.replies;
         lookup.lookup("new", "de", {});
         for (const auto &reply : old)
@@ -275,7 +274,7 @@ private slots:
         network.response = body;
         showthis::DictionaryLookup lookup(&network);
         QSignalSpy finished(&lookup, &showthis::DictionaryLookup::finished);
-        lookup.lookup("Haus", "de", {"kaikki", "ru"});
+        lookup.lookup("Haus", "de", {{{"kaikki", "ru"}}});
         QTRY_COMPARE(finished.size(), 1);
         QVERIFY(senses(finished).isEmpty());
         QCOMPARE(network.requests.size(), 1);
@@ -299,28 +298,28 @@ private slots:
         QCOMPARE(network.requests.size(), 1);
         service.lookup("Haus");
         QCOMPARE(network.requests.size(), 1);
-        service.set_dictionary_mode("kaikki");
-        service.set_definition_language("ru");
+        QVERIFY(service.configure_dictionaries({dictionary_selection("kaikki", {"ru"})}, true));
         service.lookup("Haus");
         QTRY_VERIFY(!service.dictionary_busy());
         QCOMPARE(network.requests.size(), 3);
         QCOMPARE(service.senses()[0].toMap().value("definition").toString(), QString::fromUtf8("дом"));
-        service.set_definition_language("de");
+        QVERIFY(service.configure_dictionaries({dictionary_selection("kaikki", {"de"})}, true));
         service.lookup("Haus");
         QTRY_VERIFY(!service.dictionary_busy());
         QCOMPARE(network.requests.size(), 5);
-        service.set_definition_language("ru");
+        QVERIFY(service.configure_dictionaries({dictionary_selection("kaikki", {"ru"})}, true));
         service.lookup("Haus");
         QCOMPARE(network.requests.size(), 5);
-        service.set_dictionary_mode("both");
+        QVERIFY(service.configure_dictionaries({dictionary_selection("kaikki", {"ru"}),
+            dictionary_selection("freedictionary", {"en"})}, true));
         service.lookup("Haus");
         QTRY_VERIFY(!service.dictionary_busy());
         QCOMPARE(network.requests.size(), 8);
         QCOMPARE(service.senses().size(), 2);
         QCOMPARE(service.dictionary_history().size(), 4);
+        QCOMPARE(service.dictionary_history()[0].toMap().value("dictionary_selection").toList(), service.dictionary_selection());
         showthis::LearningService reopened(nullptr, path, &network);
-        QCOMPARE(reopened.dictionary_mode(), QString("both"));
-        QCOMPARE(reopened.definition_language(), QString("ru"));
+        QCOMPARE(reopened.dictionary_selection(), service.dictionary_selection());
         reopened.lookup("Haus");
         QCOMPARE(network.requests.size(), 8);
         QCOMPARE(reopened.senses().size(), 2);
@@ -339,14 +338,15 @@ private slots:
         };
         showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
         service.set_source_language("de");
-        service.set_dictionary_mode("kaikki");
-        service.set_definition_language("ru");
+        QVERIFY(service.configure_dictionaries({dictionary_selection("kaikki", {"ru"})}, true));
         service.lookup(word);
         QTRY_VERIFY(!service.dictionary_busy());
         QCOMPARE(service.senses().size(), 2);
         QVERIFY(service.save_word({}, "Haus", "der Häuser", QString::fromUtf8("дом"), "", "", 1));
         const auto card = service.vocabulary()[0].toMap();
         QCOMPARE(card.value("word").toString(), QString("Haus"));
+        QCOMPARE(card.value("dictionary_selection").toList(), service.dictionary_selection());
+        QCOMPARE(card.value("follow_forms").toBool(), service.follow_forms());
         QCOMPARE(card.value("source").toMap().value("name").toString(), QString("Kaikki.org"));
         QCOMPARE(card.value("source").toMap().value("url").toString(), QString("https://ru.wiktionary.org/wiki/Haus"));
         const auto destination = QUrl::fromLocalFile(directory.filePath("anki.txt"));
@@ -357,6 +357,134 @@ private slots:
         QVERIFY(bytes.contains("Kaikki.org"));
         QVERIFY(bytes.contains("https://ru.wiktionary.org/wiki/Haus"));
         QVERIFY(!bytes.contains("via FreeDictionaryAPI.com"));
+    }
+
+    void multiple_editions_and_injected_provider_run_concurrently() {
+        TestNetwork network;
+        network.automatic = false;
+        network.responder = [](const QNetworkRequest &request) -> TestNetwork::Response {
+            if (request.url().host() != "kaikki.org")
+                return {free_entry("Haus", request.url().path().startsWith("/fr/") ? "maison" : "house")};
+            const auto edition = request.url().path().startsWith("/ruwiktionary/") ? QString("ru") : QString("de");
+            if (request.url().path().endsWith(".json")) return {kaikki_index("Haus", edition)};
+            return {kaikki_entry("Haus", edition == "ru" ? QString::fromUtf8("дом") : QString("Wohngebäude"))};
+        };
+        showthis::DictionaryLookup lookup(&network, nullptr, sample_dictionary_providers());
+        QCOMPARE(lookup.sources().size(), 3);
+        showthis::DictionaryOptions options;
+        QVariantList normalized;
+        QString error;
+        QVERIFY(lookup.configure({dictionary_selection("kaikki", {"ru", "de"}),
+            dictionary_selection("freedictionary", {"en"}), dictionary_selection("sample", {"fr", "en"})},
+            true, options, normalized, error));
+        QSignalSpy finished(&lookup, &showthis::DictionaryLookup::finished);
+        lookup.lookup("Haus", "de", options);
+        QCOMPARE(network.requests.size(), 5); // All source/language pairs start together.
+        for (int i = 0; i < network.replies.size(); ++i)
+            network.replies[i]->complete();
+        QCOMPARE(finished.size(), 1);
+        QCOMPARE(senses(finished).size(), 5);
+        QSet<QString> combinations;
+        for (const auto &value : senses(finished)) {
+            const auto sense = value.toMap();
+            combinations.insert(sense.value("provider").toString() + ':' + sense.value("definition_language").toString());
+            if (sense.value("provider") == "sample") {
+                QCOMPARE(sense.value("source").toMap().value("name").toString(), QString("Sample Dictionary"));
+                QCOMPARE(sense.value("source").toMap().value("provider_url").toString(), QString("https://dictionary.example/"));
+            }
+        }
+        QCOMPARE(combinations, (QSet<QString>{"kaikki:ru", "kaikki:de", "freedictionary:en", "sample:fr", "sample:en"}));
+        const auto key = showthis::DictionaryLookup::cache_key("de", "Haus", options);
+        std::reverse(options.targets.begin(), options.targets.end());
+        QCOMPARE(showthis::DictionaryLookup::cache_key("de", "Haus", options), key);
+        options.follow_forms = false;
+        QVERIFY(showthis::DictionaryLookup::cache_key("de", "Haus", options) != key);
+        lookup.lookup("Haus", "de", options);
+        QVERIFY(lookup.busy());
+        lookup.cancel();
+        for (const auto &reply : network.replies)
+            QVERIFY(!reply || reply->isFinished());
+        QCOMPARE(finished.size(), 1);
+        QVERIFY(!lookup.busy());
+    }
+
+    void selections_are_validated_atomically_and_duplicates_merged() {
+        QTemporaryDir directory;
+        TestNetwork network;
+        network.automatic = false;
+        showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
+        const auto original = service.dictionary_selection();
+        service.lookup("Haus");
+        QVERIFY(service.dictionary_busy());
+        QSignalSpy preferences(&service, &showthis::LearningService::preferences_changed);
+        QVERIFY(!service.configure_dictionaries({dictionary_selection("missing", {"en"})}, false));
+        QVERIFY(!service.configure_dictionaries({dictionary_selection("freedictionary", {"ru"})}, false));
+        QVERIFY(!service.configure_dictionaries({dictionary_selection("kaikki", {})}, false));
+        QVERIFY(!service.configure_dictionaries({dictionary_selection("kaikki", {"ru"}),
+            dictionary_selection("kaikki", {"de"}, true)}, false));
+        QCOMPARE(service.dictionary_selection(), original);
+        QVERIFY(service.dictionary_busy()); // Invalid edits do not cancel an active lookup.
+        QCOMPARE(preferences.size(), 0);
+        QVERIFY(service.configure_dictionaries({dictionary_selection("kaikki", {"ru", "ru"}),
+            dictionary_selection("kaikki", {"de", "ru"})}, false));
+        QCOMPARE(preferences.size(), 1);
+        QVERIFY(!service.dictionary_busy());
+        QVERIFY(network.last_reply->isFinished());
+        QCOMPARE(service.dictionary_selection(), QVariantList{dictionary_selection("kaikki", {"de", "ru"})});
+        QVERIFY(!service.follow_forms());
+        QVERIFY(service.configure_dictionaries({}, true));
+        service.lookup("Haus");
+        QVERIFY(!service.dictionary_busy());
+        QVERIFY(service.message().contains("Select a dictionary"));
+    }
+
+    void multiple_fallback_languages_are_deferred_then_started_together() {
+        TestNetwork network;
+        network.automatic = false;
+        network.responder = [](const QNetworkRequest &request) -> TestNetwork::Response {
+            if (request.url().host() == "freedictionaryapi.com") return {{}, 404};
+            const auto edition = request.url().path().startsWith("/ruwiktionary/") ? QString("ru") : QString("de");
+            if (request.url().path().endsWith(".json")) return {kaikki_index("Haus", edition)};
+            return {kaikki_entry("Haus", edition)};
+        };
+        showthis::DictionaryLookup lookup(&network);
+        QSignalSpy finished(&lookup, &showthis::DictionaryLookup::finished);
+        lookup.lookup("Haus", "de", {{{"freedictionary", "en"}, {"kaikki", "ru", true}, {"kaikki", "de", true}}});
+        QCOMPARE(network.requests.size(), 1);
+        network.replies[0]->complete();
+        QCOMPARE(network.requests.size(), 3);
+        QVERIFY(finished.isEmpty());
+        for (int i = 1; i < network.replies.size(); ++i)
+            network.replies[i]->complete();
+        QCOMPARE(finished.size(), 1);
+        QCOMPARE(senses(finished).size(), 2);
+    }
+
+    void source_language_pair_limit() {
+        class ManyLanguagesProvider : public SampleDictionaryProvider {
+        public:
+            QVariantList definition_languages() const override {
+                QVariantList result;
+                for (int i = 0; i < 40; ++i)
+                    result.append(QVariantMap{{"code", QString("lang%1").arg(i)}, {"name", QString("Language %1").arg(i)}});
+                return result;
+            }
+        };
+        showthis::DictionaryProviders providers;
+        providers.push_back(std::make_unique<ManyLanguagesProvider>());
+        TestNetwork network;
+        showthis::DictionaryLookup lookup(&network, nullptr, std::move(providers));
+        QStringList languages;
+        for (int i = 0; i < 33; ++i)
+            languages.append(QString("lang%1").arg(i));
+        showthis::DictionaryOptions options;
+        QVariantList normalized;
+        QString error;
+        QVERIFY(!lookup.configure({dictionary_selection("sample", languages)}, true, options, normalized, error));
+        QVERIFY(error.contains("32"));
+        languages.removeLast();
+        QVERIFY(lookup.configure({dictionary_selection("sample", languages)}, true, options, normalized, error));
+        QCOMPARE(options.targets.size(), 32);
     }
 };
 

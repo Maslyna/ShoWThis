@@ -14,7 +14,6 @@ NotebookSurface {
     signal sense_selected(int index)
     signal manual_meaning_requested()
     signal headword_requested(string word)
-    signal both_requested()
     objectName: "dictionary_pane"
 
     ColumnLayout {
@@ -23,15 +22,6 @@ NotebookSurface {
         RowLayout {
             Layout.fillWidth: true
             Label { text: qsTr("Dictionary"); font.pixelSize: 17; font.bold: true; Layout.fillWidth: true }
-            NotebookButton {
-                objectName: "search_both_dictionaries"
-                text: qsTr("Search both")
-                quiet: true
-                font.pixelSize: 10
-                visible: dictionary.service.dictionary_mode !== "both"
-                enabled: !dictionary.service.dictionary_busy && dictionary.word.trim().length > 0
-                onClicked: dictionary.both_requested()
-            }
         }
         Item {
             Layout.fillWidth: true
@@ -76,8 +66,8 @@ NotebookSurface {
                     contentItem: ColumnLayout {
                         spacing: 6
                         Label {
-                            text: (row.modelData.provider === "kaikki" ? "Kaikki" : "FreeDictionaryAPI")
-                                + " · " + (row.modelData.definition_language || "en").toUpperCase()
+                            text: ((row.modelData.source || {}).name || row.modelData.provider)
+                                + " · " + (row.modelData.definition_language || "").toUpperCase()
                                 + " · " + (row.modelData.headword || dictionary.word)
                             textFormat: Text.PlainText
                             font.pixelSize: 10
@@ -139,26 +129,24 @@ NotebookSurface {
         RowLayout {
             Layout.fillWidth: true
             NotebookButton {
-                text: "FreeDictionaryAPI ↗"
+                visible: !!dictionary.active_source.provider_url
+                text: (dictionary.active_source.name || qsTr("Source")) + " ↗"
                 quiet: true
                 font.pixelSize: 10
-                onClicked: Qt.openUrlExternally("https://freedictionaryapi.com/")
-            }
-            NotebookButton {
-                text: "Kaikki ↗"
-                quiet: true
-                font.pixelSize: 10
-                onClicked: Qt.openUrlExternally("https://kaikki.org/")
+                onClicked: {
+                    const url = dictionary.active_source.provider_url || ""
+                    if (url.startsWith("https://")) Qt.openUrlExternally(url)
+                }
             }
             Item { Layout.fillWidth: true }
             NotebookButton {
                 visible: !!dictionary.active_source.url
-                text: "Wiktionary · CC BY-SA ↗"
+                text: qsTr("Entry") + " · " + ((dictionary.active_source.license || {}).name || qsTr("Source")) + " ↗"
                 quiet: true
                 font.pixelSize: 10
                 onClicked: {
                     const url = dictionary.active_source.url || ""
-                    if (/^https:\/\/[a-z-]+\.wiktionary\.org\//.test(url)) Qt.openUrlExternally(url)
+                    if (url.startsWith("https://")) Qt.openUrlExternally(url)
                 }
             }
         }

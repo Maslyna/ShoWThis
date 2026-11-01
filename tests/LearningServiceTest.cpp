@@ -188,7 +188,6 @@ QTEST_GUILESS_MAIN(LearningServiceTest)
 
 void LearningServiceTest::init() {
     QSettings{}.clear();
-    QSettings{}.setValue("dictionary/definition_language", "en");
 }
 
 void LearningServiceTest::history_limit_and_recency() {
@@ -224,7 +223,7 @@ void LearningServiceTest::history_limit_and_recency() {
     QVERIFY(file.open(QIODevice::ReadOnly));
     const auto stored = QJsonDocument::fromJson(file.readAll()).object();
     QCOMPARE(stored.value("dictionary_cache").toObject().size(), 2);
-    QVERIFY(!stored.value("dictionary_cache").toObject().contains("de:Baum|freedictionary|en|only|forms"));
+    QVERIFY(!stored.value("dictionary_cache").toObject().contains(showthis::DictionaryLookup::cache_key("de", "Baum", {})));
     service.set_history_limit(1);
     QCOMPARE(service.dictionary_history().size(), 1);
     QCOMPARE(service.vocabulary().size(), 1);
@@ -298,8 +297,8 @@ void LearningServiceTest::legacy_history_migration() {
     QFile file(path);
     QVERIFY(file.open(QIODevice::WriteOnly));
     file.write(QJsonDocument(QJsonObject{{"version", 1}, {"cards", QJsonArray{}},
-        {"dictionary_cache", QJsonObject{{"de:Haus|freedictionary|en|only|forms", response},
-            {"de:Baum|freedictionary|en|only|forms", response}}}}).toJson());
+        {"dictionary_cache", QJsonObject{{showthis::DictionaryLookup::cache_key("de", "Haus", {}), response},
+            {showthis::DictionaryLookup::cache_key("de", "Baum", {}), response}}}}).toJson());
     file.close();
     TestNetwork network;
     showthis::LearningService service(nullptr, path, &network);

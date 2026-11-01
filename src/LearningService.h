@@ -26,16 +26,14 @@ class LearningService : public QObject {
     Q_PROPERTY(QString source_language READ source_language WRITE set_source_language NOTIFY preferences_changed)
     Q_PROPERTY(QString target_language READ target_language WRITE set_target_language NOTIFY preferences_changed)
     Q_PROPERTY(QVariantList language_options READ language_options CONSTANT)
-    Q_PROPERTY(QString dictionary_mode READ dictionary_mode WRITE set_dictionary_mode NOTIFY preferences_changed)
-    Q_PROPERTY(QString definition_language READ definition_language WRITE set_definition_language NOTIFY preferences_changed)
-    Q_PROPERTY(bool dictionary_fallback READ dictionary_fallback WRITE set_dictionary_fallback NOTIFY preferences_changed)
-    Q_PROPERTY(bool follow_forms READ follow_forms WRITE set_follow_forms NOTIFY preferences_changed)
-    Q_PROPERTY(QVariantList dictionary_modes READ dictionary_modes CONSTANT)
-    Q_PROPERTY(QVariantList definition_languages READ definition_languages CONSTANT)
+    Q_PROPERTY(QVariantList dictionary_sources READ dictionary_sources CONSTANT)
+    Q_PROPERTY(QVariantList dictionary_selection READ dictionary_selection NOTIFY preferences_changed)
+    Q_PROPERTY(bool follow_forms READ follow_forms NOTIFY preferences_changed)
 
 public:
     explicit LearningService(QObject *parent = nullptr, const QString &file_name = {},
-                             QNetworkAccessManager *network = nullptr);
+                              QNetworkAccessManager *network = nullptr,
+                              DictionaryProviders providers = default_dictionary_providers());
     QVariantList senses() const { return m_senses; }
     QVariantMap source() const { return m_source; }
     TranslationService *translator() const { return m_translator; }
@@ -49,16 +47,10 @@ public:
     QString source_language() const { return m_source_language; }
     QString target_language() const { return m_target_language; }
     QVariantList language_options() const;
-    QString dictionary_mode() const { return m_dictionary_options.mode; }
-    QString definition_language() const { return m_dictionary_options.edition; }
-    bool dictionary_fallback() const { return m_dictionary_options.fallback; }
+    QVariantList dictionary_sources() const { return m_dictionary->sources(); }
+    QVariantList dictionary_selection() const { return m_dictionary_selection; }
     bool follow_forms() const { return m_dictionary_options.follow_forms; }
-    QVariantList dictionary_modes() const;
-    QVariantList definition_languages() const { return DictionaryLookup::edition_options(); }
-    void set_dictionary_mode(const QString &mode);
-    void set_definition_language(const QString &language);
-    void set_dictionary_fallback(bool enabled);
-    void set_follow_forms(bool enabled);
+    Q_INVOKABLE bool configure_dictionaries(const QVariantList &selection, bool follow_forms);
     void set_source_language(const QString &language);
     void set_target_language(const QString &language);
     void set_history_limit(int limit);
@@ -101,6 +93,7 @@ private:
     QString m_lookup_context;
     QString m_lookup_key;
     DictionaryOptions m_dictionary_options;
+    QVariantList m_dictionary_selection;
     QVariantList m_cards;
     QJsonObject m_cache;
     QVariantList m_history;

@@ -231,8 +231,8 @@ Pane {
                     service: panel.service
                     onOpen_requested: function(entry) {
                         panel.request_card({word: entry.word, language: entry.language, context: entry.context,
-                            dictionary_mode: entry.dictionary_mode, definition_language: entry.definition_language,
-                            dictionary_fallback: entry.dictionary_fallback, follow_forms: entry.follow_forms, from_history: true})
+                            dictionary_selection: entry.dictionary_selection,
+                            follow_forms: entry.follow_forms, from_history: true})
                     }
                     onSettings_requested: navigation.current_index = 3
                 }

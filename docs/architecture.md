@@ -11,8 +11,9 @@ edited normally before lookup or saving.
   card suppresses dirty tracking; opening another card goes through the panel's
   unsaved-change confirmation.
 - `NotebookDictionary.qml` displays dictionary results.
-- `NotebookDictionaryOptions.qml` selects sources, Kaikki definition language,
-  fallback search, and whether to follow base-form links.
+- `NotebookDictionaryOptions.qml` shows a compact source summary and a staged
+  Apply/Cancel picker. `NotebookDictionarySource.qml` renders each registered
+  source's languages and fallback role from metadata.
 - `NotebookCardEditor.qml` edits the personal meaning, translation, prefix, and notes.
 - `NotebookVocabulary.qml` owns saved-word search and export selection.
 - `NotebookHistory.qml` displays and searches recent lookups.
@@ -28,8 +29,11 @@ for tests; the caller retains ownership of an injected service.
 
 - `LearningService` exposes notebook operations and observable state to QML and
   coordinates dictionary requests and optional translation.
-- `DictionaryLookup` queries FreeDictionaryAPI and Kaikki independently or in
-  parallel, follows bounded dictionary references, and cancels obsolete requests.
+- `DictionaryLookup` schedules registered source/language pairs concurrently,
+  follows bounded dictionary references, and cancels obsolete requests.
+- `DictionaryProvider` owns source metadata and the request/response protocol.
+  Kaikki and FreeDictionaryAPI are registered in `DictionaryProviders.cpp`;
+  neither the scheduler nor QML needs provider-name branches.
 - `DictionaryData` normalizes the providers' formats and explicit form-of links.
 - `TranslationService` owns provider selection, configuration, request lifecycle,
   and translated text. It defaults to no translator. Translation fields and

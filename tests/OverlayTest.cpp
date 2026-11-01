@@ -52,7 +52,6 @@ private slots:
 
     void init() {
         QSettings{}.clear();
-        QSettings{}.setValue("dictionary/definition_language", "en");
     }
 
     void word_card_context_data() {
@@ -74,7 +73,7 @@ private slots:
         QFile store(directory.filePath(QStringLiteral("vocabulary.json")));
         QVERIFY(store.open(QIODevice::WriteOnly));
         store.write(QJsonDocument(QJsonObject{{"version", 1}, {"cards", QJsonArray{}},
-            {"dictionary_cache", QJsonObject{{"de:Haus|freedictionary|en|only|forms", data}}}}).toJson());
+            {"dictionary_cache", QJsonObject{{dictionary_cache_key("de", "Haus"), data}}}}).toJson());
         store.close();
         showthis::LearningService service(nullptr, store.fileName());
         service.set_source_language(QStringLiteral("de"));
@@ -366,24 +365,41 @@ private slots:
 
     void dictionary_sources_and_native_headwords_data() {
         QTest::addColumn<QSize>("size");
-        QTest::newRow("desktop") << QSize(1100, 800);
-        QTest::newRow("compact") << QSize(640, 700);
+        QTest::addColumn<bool>("dark");
+        QTest::newRow("desktop") << QSize(1100, 800) << false;
+        QTest::newRow("compact") << QSize(640, 700) << false;
+        QTest::newRow("small") << QSize(480, 640) << false;
+        QTest::newRow("small-dark") << QSize(480, 640) << true;
     }
 
     void dictionary_sources_and_native_headwords() {
         QFETCH(QSize, size);
+        QFETCH(bool, dark);
+        const auto original_palette = QGuiApplication::palette();
+        const auto restore_palette = qScopeGuard([&]() { QGuiApplication::setPalette(original_palette); });
+        if (dark) {
+            QPalette palette = original_palette;
+            palette.setColor(QPalette::Window, QColor("#252a31"));
+            palette.setColor(QPalette::Base, QColor("#1c2026"));
+            palette.setColor(QPalette::Button, QColor("#303741"));
+            palette.setColor(QPalette::WindowText, QColor("#edf1f5"));
+            palette.setColor(QPalette::Text, QColor("#edf1f5"));
+            palette.setColor(QPalette::ButtonText, QColor("#edf1f5"));
+            QGuiApplication::setPalette(palette);
+        }
         QTemporaryDir directory;
         TestNetwork network;
         const auto observed = QString::fromUtf8("Häuser");
         network.responder = [&](const QNetworkRequest &request) -> TestNetwork::Response {
             if (request.url().host() == "freedictionaryapi.com") return {free_entry("Haus", "house")};
+            if (request.url().host() == "dictionary.example") return {free_entry("Haus", "maison")};
             const auto word = request.url().path().contains(QString::fromUtf8("hä"))
                 || request.url().path().endsWith(observed + ".jsonl") ? observed : QString("Haus");
             if (request.url().path().endsWith(".json")) return {kaikki_index(word, "ru")};
             return {kaikki_entry(word, word == observed ? QString::fromUtf8("форма Haus") : QString::fromUtf8("дом"),
                 "de", word == observed ? QString("Haus") : QString{})};
         };
-        showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
+        showthis::LearningService service(nullptr, directory.filePath("words.json"), &network, sample_dictionary_providers());
         service.set_source_language("de");
         showthis::ShoWSurface surface(nullptr, &service);
         QCOMPARE(surface.status(), QQuickView::Ready);
@@ -394,27 +410,74 @@ private slots:
         auto *panel = find_item(surface.contentItem(), "learning_panel");
         QVERIFY(panel);
         QVERIFY(QMetaObject::invokeMethod(panel, "open_word", Q_ARG(QString, observed), Q_ARG(QString, QString("der Häuser"))));
-        auto *mode = find_item(surface.contentItem(), "dictionary_mode");
-        auto *edition = find_item(surface.contentItem(), "definition_language");
+        auto *choose = find_item(surface.contentItem(), "choose_dictionary_sources");
         auto *lookup = find_item(surface.contentItem(), "lookup_dictionary");
         auto *word = find_item(surface.contentItem(), "lookup_word");
         auto *meaning = find_item(surface.contentItem(), "word_meaning");
         auto *save = find_item(surface.contentItem(), "save_word");
-        auto *both = find_item(surface.contentItem(), "search_both_dictionaries");
-        QVERIFY(mode);
-        QVERIFY(edition);
+        QVERIFY(choose);
         QVERIFY(lookup);
         QVERIFY(word);
         QVERIFY(meaning);
         QVERIFY(save);
-        QVERIFY(both);
-        mode->setProperty("currentIndex", 0); // Kaikki
-        QVERIFY(QMetaObject::invokeMethod(mode, "activated", Q_ARG(int, 0)));
-        QCOMPARE(service.dictionary_mode(), QString("kaikki"));
-        QVERIFY(edition->isVisible());
-        edition->setProperty("currentIndex", 1); // Russian definition language
-        QVERIFY(QMetaObject::invokeMethod(edition, "activated", Q_ARG(int, 1)));
-        QCOMPARE(service.definition_language(), QString("ru"));
+        const auto original = service.dictionary_selection();
+        meaning->setProperty("text", "My typed meaning");
+        QVERIFY(QMetaObject::invokeMethod(choose, "clicked"));
+        QTRY_VERIFY(find_item(surface.contentItem(), "dictionary_source_kaikki"));
+        auto *dialog = surface.rootObject()->findChild<QObject *>("dictionary_source_picker");
+        QVERIFY(dialog);
+        if (dark) {
+            auto *background = dialog->property("background").value<QQuickItem *>();
+            QVERIFY(background);
+            QTRY_COMPARE(background->property("color").value<QColor>(), QColor("#252a31"));
+            auto *card = find_item(surface.contentItem(), "dictionary_source_card_kaikki");
+            QVERIFY(card);
+            auto *card_background = card->property("background").value<QQuickItem *>();
+            QVERIFY(card_background);
+            QTRY_COMPARE(card_background->property("color").value<QColor>(), QColor("#1c2026"));
+        }
+        auto *kaikki = find_item(surface.contentItem(), "dictionary_source_kaikki");
+        auto *free = find_item(surface.contentItem(), "dictionary_source_freedictionary");
+        auto *russian = find_item(surface.contentItem(), "dictionary_language_kaikki_ru");
+        auto *english = find_item(surface.contentItem(), "dictionary_language_kaikki_en");
+        auto *apply = find_item(surface.contentItem(), "apply_dictionary_sources");
+        auto *cancel = find_item(surface.contentItem(), "cancel_dictionary_sources");
+        QVERIFY(kaikki && free && russian && english && apply && cancel);
+        auto toggle = [](QQuickItem *item, bool checked) {
+            item->setProperty("checked", checked);
+            return QMetaObject::invokeMethod(item, "toggled");
+        };
+        QVERIFY(toggle(kaikki, true));
+        QVERIFY(toggle(free, false));
+        if (!russian->property("checked").toBool()) QVERIFY(QMetaObject::invokeMethod(russian, "clicked"));
+        if (english->property("checked").toBool()) QVERIFY(QMetaObject::invokeMethod(english, "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(russian, "clicked"));
+        QVERIFY(!apply->isEnabled()); // Selected sources must have a language.
+        QVERIFY(QMetaObject::invokeMethod(russian, "clicked"));
+        QVERIFY(apply->isEnabled());
+        QCOMPARE(service.dictionary_selection(), original); // Changes are staged.
+        QVERIFY(QMetaObject::invokeMethod(cancel, "clicked"));
+        QCOMPARE(service.dictionary_selection(), original);
+        QVERIFY(QMetaObject::invokeMethod(choose, "clicked"));
+        QTest::qWait(30);
+        QVERIFY(!kaikki->property("checked").toBool());
+        QVERIFY(toggle(kaikki, true));
+        QVERIFY(toggle(free, false));
+        if (!russian->property("checked").toBool()) QVERIFY(QMetaObject::invokeMethod(russian, "clicked"));
+        if (english->property("checked").toBool()) QVERIFY(QMetaObject::invokeMethod(english, "clicked"));
+        const auto apply_rect = apply->mapRectToScene(QRectF(QPointF(), apply->size()));
+        QVERIFY(apply_rect.left() >= 0 && apply_rect.right() <= size.width());
+        QVERIFY(apply_rect.top() >= 0 && apply_rect.bottom() <= size.height());
+        if (qEnvironmentVariableIsSet("SHOWTHIS_TEST_SCREENSHOTS")) {
+            QTest::qWait(80);
+            const auto path = qEnvironmentVariable("SHOWTHIS_TEST_SCREENSHOTS")
+                + "/dictionary-picker-" + QTest::currentDataTag() + ".png";
+            QVERIFY(surface.grabWindow().save(path));
+        }
+        QVERIFY(QMetaObject::invokeMethod(apply, "clicked"));
+        QCOMPARE(service.dictionary_selection(), QVariantList{dictionary_selection("kaikki", {"ru"})});
+        QCOMPARE(meaning->property("text").toString(), QString("My typed meaning"));
+        QCOMPARE(word->property("text").toString(), observed);
         QCOMPARE(service.source_language(), QString("de"));
         QVERIFY(network.requests.isEmpty());
         QVERIFY(QMetaObject::invokeMethod(lookup, "clicked"));
@@ -427,13 +490,29 @@ private slots:
         QCOMPARE(meaning->property("text").toString(), QString::fromUtf8("дом"));
         QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
         QCOMPARE(service.vocabulary()[0].toMap().value("source").toMap().value("name").toString(), QString("Kaikki.org"));
-        QVERIFY(QMetaObject::invokeMethod(both, "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(choose, "clicked"));
+        QVERIFY(toggle(free, true));
+        auto *sample = find_item(surface.contentItem(), "dictionary_source_sample");
+        auto *sample_en = find_item(surface.contentItem(), "dictionary_language_sample_en");
+        auto *sample_fr = find_item(surface.contentItem(), "dictionary_language_sample_fr");
+        QVERIFY(sample && sample_en && sample_fr);
+        QVERIFY(toggle(sample, true));
+        if (!sample_en->property("checked").toBool()) QVERIFY(QMetaObject::invokeMethod(sample_en, "clicked"));
+        if (!sample_fr->property("checked").toBool()) QVERIFY(QMetaObject::invokeMethod(sample_fr, "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(apply, "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(lookup, "clicked"));
         QTRY_VERIFY(!service.dictionary_busy());
-        QCOMPARE(service.dictionary_mode(), QString("both"));
-        QCOMPARE(service.senses().size(), 2);
-        QVERIFY(!both->isVisible());
+        QCOMPARE(service.dictionary_selection().size(), 3);
+        QCOMPARE(service.senses().size(), 4);
         QCOMPARE(service.senses()[0].toMap().value("definition_language").toString(), QString("ru"));
         QCOMPARE(service.senses()[1].toMap().value("definition_language").toString(), QString("en"));
+        QCOMPARE(service.senses()[2].toMap().value("source").toMap().value("name").toString(), QString("Sample Dictionary"));
+        QVERIFY(QMetaObject::invokeMethod(choose, "clicked"));
+        QVERIFY(toggle(sample, false));
+        QTest::keyClick(&surface, Qt::Key_Escape);
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QVERIFY(panel->isVisible());
+        QCOMPARE(service.dictionary_selection().size(), 3); // Escape discards staged changes only.
         QCOMPARE(warnings.size(), 0);
     }
 

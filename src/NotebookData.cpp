@@ -88,10 +88,11 @@ QVariantList dictionary_senses(const QJsonObject &data, const QString &language)
             entry.insert("source", data.value("source"));
         if (!entry.contains("headword"))
             entry.insert("headword", data.value("word"));
+        const auto source = entry.value("source").toObject();
         if (!entry.contains("provider"))
-            entry.insert("provider", "freedictionary");
+            entry.insert("provider", source.value("provider"));
         if (!entry.contains("definition_language"))
-            entry.insert("definition_language", "en");
+            entry.insert("definition_language", source.value("definition_language"));
         if (normalized_language_code(entry.value("language").toObject().value("code").toString()) == language)
             append_senses(entry.value("senses").toArray(), entry, result);
     }

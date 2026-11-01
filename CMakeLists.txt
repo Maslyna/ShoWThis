@@ -22,6 +22,9 @@ qt_add_library(showthis_core STATIC
     src/NotebookData.h src/NotebookData.cpp
     src/DictionaryData.h src/DictionaryData.cpp
     src/DictionaryLookup.h src/DictionaryLookup.cpp
+    src/DictionaryProvider.h src/DictionaryProviders.cpp
+    src/FreeDictionaryProvider.h src/FreeDictionaryProvider.cpp
+    src/KaikkiDictionaryProvider.h src/KaikkiDictionaryProvider.cpp
     src/AnkiExporter.h src/AnkiExporter.cpp
     src/TranslationProvider.h src/TranslationProviders.cpp
     src/TranslationService.h src/TranslationService.cpp

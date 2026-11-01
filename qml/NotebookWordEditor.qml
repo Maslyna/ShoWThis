@@ -35,12 +35,10 @@ ColumnLayout {
         const card = action.card || ({})
         if (card.language || action.language) service.source_language = card.language || action.language
         if (card.target_language) service.target_language = card.target_language
-        if (card.dictionary_mode || action.dictionary_mode)
-            service.dictionary_mode = card.dictionary_mode || action.dictionary_mode
-        if (card.definition_language || action.definition_language)
-            service.definition_language = card.definition_language || action.definition_language
-        if (action.dictionary_fallback !== undefined) service.dictionary_fallback = action.dictionary_fallback
-        if (action.follow_forms !== undefined) service.follow_forms = action.follow_forms
+        const selection = card.dictionary_selection || action.dictionary_selection
+        const forms = card.follow_forms !== undefined ? card.follow_forms : action.follow_forms
+        if (selection !== undefined)
+            service.configure_dictionaries(selection, forms !== undefined ? forms : service.follow_forms)
         service.clear()
         card_id = card.id || ""
         saved_source = card.source || ({})
@@ -91,10 +89,6 @@ ColumnLayout {
     function search_headword(word: string) {
         word_input.text = word
         reset_lookup()
-        lookup()
-    }
-    function search_both() {
-        service.dictionary_mode = "both"
         lookup()
     }
     function save_card() {
@@ -185,7 +179,11 @@ ColumnLayout {
                     }
                     NotebookDictionaryOptions {
                         service: editor.service
-                        onChanged: editor.reset_lookup()
+                        onChanged: {
+                            editor.selected_sense = -1
+                            editor.lookup_attempted = false
+                            editor.mark_dirty()
+                        }
                     }
                 }
             }
@@ -271,7 +269,6 @@ ColumnLayout {
                     onSense_selected: function(index) { editor.select_sense(index) }
                     onManual_meaning_requested: editor.compact_page = 1
                     onHeadword_requested: function(word) { editor.search_headword(word) }
-                    onBoth_requested: editor.search_both()
                 }
                 NotebookCardEditor {
                     id: card_form

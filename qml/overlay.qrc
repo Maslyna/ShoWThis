@@ -13,6 +13,7 @@
         <file>NotebookWordEditor.qml</file>
         <file>NotebookDictionary.qml</file>
         <file>NotebookDictionaryOptions.qml</file>
+        <file>NotebookDictionarySource.qml</file>
         <file>NotebookCardEditor.qml</file>
         <file>NotebookVocabulary.qml</file>
         <file>NotebookHistory.qml</file>

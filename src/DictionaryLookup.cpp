@@ -1,45 +1,96 @@
 #include "DictionaryLookup.h"
 #include "DictionaryData.h"
 
+#include <QCryptographicHash>
 #include <QJsonDocument>
-#include <QNetworkRequest>
+#include <algorithm>
 
 namespace showthis {
 
-DictionaryLookup::DictionaryLookup(QNetworkAccessManager *network, QObject *parent)
-    : QObject(parent), m_network(network) {}
+DictionaryLookup::DictionaryLookup(QNetworkAccessManager *network, QObject *parent, DictionaryProviders providers)
+    : QObject(parent), m_providers(std::move(providers)), m_network(network) {}
 
-DictionaryLookup::~DictionaryLookup() {
-    cancel();
+DictionaryLookup::~DictionaryLookup() { cancel(); }
+
+const DictionaryProvider *DictionaryLookup::provider(const QString &id) const {
+    for (const auto &item : m_providers) {
+        if (item->id() == id)
+            return item.get();
+    }
+    return nullptr;
 }
 
-QVariantList DictionaryLookup::edition_options() {
-    return {
-        QVariantMap{{"code", "en"}, {"name", "English"}},
-        QVariantMap{{"code", "ru"}, {"name", QString::fromUtf8("Русский")}},
-        QVariantMap{{"code", "de"}, {"name", "Deutsch"}},
-        QVariantMap{{"code", "fr"}, {"name", QString::fromUtf8("Français")}},
-        QVariantMap{{"code", "es"}, {"name", QString::fromUtf8("Español")}},
-        QVariantMap{{"code", "pl"}, {"name", "Polski"}},
-        QVariantMap{{"code", "it"}, {"name", "Italiano"}},
-        QVariantMap{{"code", "pt"}, {"name", QString::fromUtf8("Português")}},
-        QVariantMap{{"code", "nl"}, {"name", "Nederlands"}},
-        QVariantMap{{"code", "zh"}, {"name", QString::fromUtf8("中文")}},
-        QVariantMap{{"code", "ja"}, {"name", QString::fromUtf8("日本語")}},
-        QVariantMap{{"code", "ko"}, {"name", QString::fromUtf8("한국어")}},
-        QVariantMap{{"code", "el"}, {"name", QString::fromUtf8("Ελληνικά")}},
-        QVariantMap{{"code", "tr"}, {"name", QString::fromUtf8("Türkçe")}},
-        QVariantMap{{"code", "cs"}, {"name", QString::fromUtf8("Čeština")}},
-        QVariantMap{{"code", "id"}, {"name", "Bahasa Indonesia"}},
-        QVariantMap{{"code", "ms"}, {"name", "Bahasa Melayu"}},
-        QVariantMap{{"code", "vi"}, {"name", QString::fromUtf8("Tiếng Việt")}},
-        QVariantMap{{"code", "th"}, {"name", QString::fromUtf8("ไทย")}},
-        QVariantMap{{"code", "ku"}, {"name", QString::fromUtf8("Kurdî")}}
-    };
+QVariantList DictionaryLookup::sources() const {
+    QVariantList result;
+    for (const auto &item : m_providers)
+        result.append(item->metadata());
+    return result;
 }
 
-QString DictionaryLookup::edition_path() const {
-    return m_options.edition == "en" ? QStringLiteral("/dictionary/") : '/' + m_options.edition + "wiktionary/";
+bool DictionaryLookup::configure(const QVariantList &selection, bool follow_forms, DictionaryOptions &options,
+    QVariantList &normalized, QString &error) const {
+    QHash<QString, QStringList> languages;
+    QHash<QString, bool> fallback;
+    for (const auto &value : selection) {
+        const auto item = value.toMap();
+        const auto id = item.value("provider").toString();
+        const auto *source = provider(id);
+        if (!source) {
+            error = tr("Unknown dictionary source: %1.").arg(id);
+            return false;
+        }
+        if (fallback.contains(id) && fallback.value(id) != item.value("fallback").toBool()) {
+            error = tr("A dictionary source cannot be both primary and fallback.");
+            return false;
+        }
+        fallback[id] = item.value("fallback").toBool();
+        const auto selected_languages = item.value("languages").toStringList();
+        if (selected_languages.isEmpty()) {
+            error = tr("Select at least one definition language for %1.").arg(source->name());
+            return false;
+        }
+        for (const auto &language : selected_languages) {
+            const auto supported = source->definition_languages();
+            if (std::none_of(supported.begin(), supported.end(), [&](const QVariant &option) {
+                return option.toMap().value("code").toString() == language;
+            })) {
+                error = tr("%1 does not offer definitions in %2.").arg(source->name(), language);
+                return false;
+            }
+            if (!languages[id].contains(language))
+                languages[id].append(language);
+        }
+    }
+    options.targets.clear();
+    options.follow_forms = follow_forms;
+    normalized.clear();
+    for (const auto &source : m_providers) {
+        auto selected = languages.value(source->id());
+        if (selected.isEmpty())
+            continue;
+        selected.sort();
+        normalized.append(QVariantMap{{"provider", source->id()}, {"languages", selected},
+            {"fallback", fallback.value(source->id())}});
+        for (const auto &language : selected)
+            options.targets.append({source->id(), language, fallback.value(source->id())});
+    }
+    if (options.targets.size() > 32) {
+        error = tr("Select at most 32 source/language combinations.");
+        return false;
+    }
+    error.clear();
+    return true;
+}
+
+QString DictionaryLookup::cache_key(const QString &language, const QString &word, const DictionaryOptions &options) {
+    QStringList targets;
+    for (const auto &target : options.targets)
+        targets.append(target.key() + (target.fallback ? ":fallback" : ":primary"));
+    targets.sort();
+    const QJsonObject configuration{{"targets", QJsonArray::fromStringList(targets)}, {"forms", options.follow_forms}};
+    const auto digest = QCryptographicHash::hash(QJsonDocument(configuration).toJson(QJsonDocument::Compact),
+        QCryptographicHash::Sha256).toHex();
+    return language + ':' + word + '|' + QString::fromLatin1(digest);
 }
 
 void DictionaryLookup::cancel() {
@@ -59,26 +110,40 @@ void DictionaryLookup::lookup(const QString &word, const QString &language, cons
     m_word = word;
     m_language = language;
     m_options = options;
+    m_active.clear();
     m_entries.clear();
     m_visited.clear();
     m_errors.clear();
     m_missing.clear();
-    m_source_order = options.mode == "both" ? QStringList{"kaikki", "freedictionary"} : QStringList{options.mode};
+    m_fallback_started = false;
+    // Validate direct C++ callers as well as configurations originating in QML.
+    for (const auto &target : options.targets) {
+        const auto *source = provider(target.provider);
+        const auto supported = source ? source->definition_languages() : QVariantList{};
+        if (!source || std::none_of(supported.begin(), supported.end(), [&](const QVariant &value) {
+            return value.toMap().value("code").toString() == target.language;
+        }) || options.targets.size() > 32) {
+            emit finished({}, tr("Invalid dictionary source/language selection."), false);
+            return;
+        }
+        if (!target.fallback && std::none_of(m_active.begin(), m_active.end(), [&](const auto &item) {
+            return item.key() == target.key();
+        }))
+            m_active.append(target);
+    }
     m_starting = true;
-    for (const auto &provider : m_source_order)
-        fetch_word(provider, word, 0);
+    for (const auto &target : m_active)
+        fetch_word(target, word, 0);
     m_starting = false;
     maybe_finish();
 }
 
-void DictionaryLookup::get(const QUrl &url, ResponseHandler handler) {
-    QNetworkRequest request(url);
-    request.setTransferTimeout(15000);
-    request.setRawHeader("User-Agent", "ShoWThis/1.0 (personal vocabulary learner)");
-    auto *reply = m_network->get(request);
+void DictionaryLookup::send(DictionaryRequest request, ResponseHandler handler) {
+    request.request.setTransferTimeout(15000);
+    request.request.setRawHeader("User-Agent", "ShoWThis/1.0 (personal vocabulary learner)");
+    auto *reply = m_network->sendCustomRequest(request.request, request.method, request.body);
     m_replies.insert(reply);
     connect(reply, &QObject::destroyed, this, [this, reply]() { m_replies.remove(reply); });
-    // Bound responses from remote/static endpoints, including search indexes.
     connect(reply, &QNetworkReply::readyRead, this, [reply]() {
         if (reply->bytesAvailable() > 8 * 1024 * 1024)
             reply->abort();
@@ -86,139 +151,86 @@ void DictionaryLookup::get(const QUrl &url, ResponseHandler handler) {
     const auto generation = m_generation;
     connect(reply, &QNetworkReply::finished, this, [this, reply, generation, handler = std::move(handler)]() {
         m_replies.remove(reply);
-        const auto bytes = reply->readAll();
+        const auto body = reply->readAll();
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const auto error = bytes.size() > 8 * 1024 * 1024 ? tr("Dictionary response is too large.")
+        const auto error = body.size() > 8 * 1024 * 1024 ? tr("Dictionary response is too large.")
             : reply->error() == QNetworkReply::NoError ? QString{} : reply->errorString();
         reply->deleteLater();
         if (generation == m_generation)
-            handler(bytes, status, error);
+            handler(body, status, error);
     });
 }
 
-void DictionaryLookup::fetch_word(const QString &provider, const QString &word, int depth) {
-    if (depth > 2 || m_visited[provider].contains(word) || m_visited[provider].size() >= 5)
+void DictionaryLookup::fetch_word(const DictionaryTarget &target, const QString &word, int depth) {
+    const auto key = target.key();
+    if (depth > 2 || m_visited[key].contains(word) || m_visited[key].size() >= 5)
         return;
-    m_visited[provider].insert(word);
+    m_visited[key].insert(word);
     ++m_pending_words;
-    if (provider == "kaikki") {
-        fetch_kaikki_index(word, depth, 2);
+    fetch_request(target, word, depth, provider(target.provider)->request(word, m_language, target.language));
+}
+
+void DictionaryLookup::fetch_request(const DictionaryTarget &target, const QString &word, int depth,
+    const DictionaryRequest &request, int stage) {
+    if (stage >= 8) {
+        fail_word(target, word, tr("Dictionary request exceeded the stage limit."));
         return;
     }
-    const auto url = QUrl::fromEncoded("https://freedictionaryapi.com/api/v1/entries/"
-        + m_language.toUtf8() + '/' + QUrl::toPercentEncoding(word) + "?translations=true");
-    get(url, [this, word, depth](const QByteArray &bytes, int status, const QString &error) {
+    send(request, [this, target, word, depth, request, stage](const QByteArray &body, int status, const QString &error) {
         if (!error.isEmpty()) {
             const auto message = status == 404 ? tr("No dictionary entry found.")
                 : status == 429 ? tr("Dictionary rate limit reached. Please try again later.")
                 : status == 200 ? error : tr("Dictionary request failed (%1).").arg(status);
-            fail_word("freedictionary", word, message, status == 404);
+            fail_word(target, word, message, status == 404);
             return;
         }
-        QJsonParseError parse_error;
-        const auto document = QJsonDocument::fromJson(bytes, &parse_error);
-        if (parse_error.error != QJsonParseError::NoError || !document.isObject()
-            || !document.object().value("entries").isArray()) {
-            fail_word("freedictionary", word, tr("The dictionary returned an invalid response."));
-            return;
-        }
-        consume("freedictionary", word, depth, free_dictionary_document(document.object(), word, m_language));
+        const auto response = provider(target.provider)->read_response(request, body, word, m_language, target.language);
+        if (!response.error.isEmpty())
+            fail_word(target, word, response.error, response.missing);
+        else if (response.next)
+            fetch_request(target, word, depth, *response.next, stage + 1);
+        else
+            consume(target, word, depth, response.document);
     });
 }
 
-void DictionaryLookup::fetch_kaikki_index(const QString &word, int depth, int prefix_length) {
-    auto prefix = word.toLower().left(prefix_length);
-    for (const auto &replacement : QList<QPair<QString, QString>>{{"/", "_slash_"}, {"\\", "_backslash_"},
-        {"*", "_star_"}, {"?", "_ques_"}, {"#", "_hash_"}, {".", "_dot_"}})
-        prefix.replace(replacement.first, replacement.second);
-    const auto url = QUrl::fromEncoded("https://kaikki.org" + edition_path().toUtf8()
-        + "search/start/" + QUrl::toPercentEncoding(prefix) + ".json");
-    get(url, [this, word, depth, prefix_length](const QByteArray &bytes, int status, const QString &error) {
-        if (!error.isEmpty()) {
-            fail_word("kaikki", word, status == 404 ? tr("No entry in the selected Kaikki edition.")
-                : status == 200 ? error : tr("Kaikki search failed (%1).").arg(status), status == 404);
-            return;
-        }
-        QJsonParseError parse_error;
-        const auto document = QJsonDocument::fromJson(bytes, &parse_error);
-        const auto array = document.array();
-        if (parse_error.error != QJsonParseError::NoError || array.size() != 2
-            || !array[0].isBool() || !array[1].isArray()) {
-            fail_word("kaikki", word, tr("Kaikki returned an invalid search index."));
-            return;
-        }
-        QUrl match;
-        for (const auto &value : array[1].toArray()) {
-            const auto item = value.toArray();
-            if (item.size() < 2 || item[0].toString().compare(word, Qt::CaseInsensitive) != 0)
-                continue;
-            match = QUrl(item[1].toString());
-            if (item[0].toString() == word)
-                break;
-        }
-        if (match.isEmpty() && array[0].toBool() && prefix_length == 2 && word.size() > 2) {
-            fetch_kaikki_index(word, depth, 3);
-            return;
-        }
-        // Follow only published per-word paths on the selected Kaikki edition.
-        if (match.scheme() != "https" || match.host() != "kaikki.org"
-            || !match.path().startsWith(edition_path() + "All languages combined/meaning/")
-            || !match.path().endsWith(".html")) {
-            fail_word("kaikki", word, tr("No entry in the selected Kaikki edition."), true);
-            return;
-        }
-        auto path = match.path();
-        path.chop(5);
-        match.setPath(path + ".jsonl");
-        match.setQuery({});
-        match.setFragment({});
-        get(match, [this, word, depth](const QByteArray &data, int status, const QString &error) {
-            if (!error.isEmpty()) {
-                fail_word("kaikki", word, tr("Kaikki entry request failed (%1).").arg(status), status == 404);
-                return;
-            }
-            QString parse_error;
-            const auto document = kaikki_dictionary_document(data, word, m_language, m_options.edition, parse_error);
-            if (!parse_error.isEmpty()) {
-                fail_word("kaikki", word, parse_error);
-                return;
-            }
-            consume("kaikki", word, depth, document);
-        });
-    });
-}
-
-void DictionaryLookup::consume(const QString &provider, const QString &word, int depth, const QJsonObject &document) {
+void DictionaryLookup::consume(const DictionaryTarget &target, const QString &word, int depth, const QJsonObject &document) {
     if (document.value("entries").toArray().isEmpty()) {
-        fail_word(provider, word, tr("No entry for this word language in the selected dictionary."), true);
+        fail_word(target, word, tr("No entry for this word language."), true);
         return;
     }
+    const auto *source = provider(target.provider);
     for (const auto &value : document.value("entries").toArray()) {
         auto entry = value.toObject();
+        if (!entry.contains("headword"))
+            entry.insert("headword", document.value("word").toString(word));
         entry.insert("observed_word", m_word);
-        m_entries[provider].append(entry);
+        entry.insert("provider", target.provider);
+        entry.insert("definition_language", target.language);
+        auto attribution = entry.value("source").toObject(document.value("source").toObject());
+        attribution.insert("provider", target.provider);
+        if (attribution.value("name").toString().isEmpty())
+            attribution.insert("name", source->name());
+        attribution.insert("definition_language", target.language);
+        attribution.insert("provider_url", source->website().toString());
+        entry.insert("source", attribution);
+        m_entries[target.key()].append(entry);
     }
     if (m_options.follow_forms) {
-        for (const auto &target : dictionary_form_targets(document, m_language)) {
-            if (target != word) {
-                fetch_word(provider, target, depth + 1);
-                // One edition may have a headword but no separate entry for
-                // its inflection. Share explicit headword references with the
-                // other source when both sources are participating.
-                const auto other = provider == "kaikki" ? QStringLiteral("freedictionary") : QStringLiteral("kaikki");
-                if (m_source_order.contains(other))
-                    fetch_word(other, target, depth + 1);
-            }
+        for (const auto &base : dictionary_form_targets(document, m_language)) {
+            if (base == word)
+                continue;
+            for (const auto &active : m_active)
+                fetch_word(active, base, depth + 1);
         }
     }
     finish_word();
 }
 
-void DictionaryLookup::fail_word(const QString &provider, const QString &word, const QString &message, bool missing) {
-    const auto description = (provider == "kaikki" ? "Kaikki [" + m_options.edition + ']' : QStringLiteral("FreeDictionary [en]"))
-        + ": " + word + " — " + message;
+void DictionaryLookup::fail_word(const DictionaryTarget &target, const QString &word, const QString &message, bool missing) {
+    const auto description = provider(target.provider)->name() + " [" + target.language + "]: " + word + " — " + message;
     if (missing)
-        m_missing[provider].append(description);
+        m_missing[target.key()].append(description);
     else
         m_errors.append(description);
     finish_word();
@@ -233,26 +245,40 @@ void DictionaryLookup::maybe_finish() {
     if (m_starting || m_pending_words != 0)
         return;
     QJsonArray entries;
-    for (const auto &provider : m_source_order) {
-        for (const auto &entry : m_entries.value(provider))
+    for (const auto &target : m_active) {
+        for (const auto &entry : m_entries.value(target.key()))
             entries.append(entry);
     }
     QJsonObject result{{"word", m_word}, {"entries", entries}, {"lookup_language", m_language}};
-    if (m_options.fallback && m_source_order.size() == 1 && !has_dictionary_meanings(result, m_language)) {
-        const auto other = m_source_order.first() == "kaikki" ? QStringLiteral("freedictionary") : QStringLiteral("kaikki");
-        m_source_order.append(other);
-        fetch_word(other, m_word, 0);
-        return;
+    if (!m_fallback_started && !has_dictionary_meanings(result, m_language)) {
+        m_fallback_started = true;
+        QList<DictionaryTarget> fallbacks;
+        for (const auto &target : m_options.targets) {
+            if (target.fallback && std::none_of(m_active.begin(), m_active.end(), [&](const auto &item) {
+                return item.key() == target.key();
+            })) {
+                m_active.append(target);
+                fallbacks.append(target);
+            }
+        }
+        if (!fallbacks.isEmpty()) {
+            m_starting = true;
+            for (const auto &target : fallbacks)
+                fetch_word(target, m_word, 0);
+            m_starting = false;
+            maybe_finish();
+            return;
+        }
     }
     if (!entries.isEmpty())
         result.insert("source", entries.first().toObject().value("source"));
     auto messages = m_errors;
-    for (const auto &provider : m_source_order) {
-        // A missing inflection page is not a failure if the headword was
-        // subsequently found, possibly via a reference from the other source.
-        if (!has_dictionary_meanings(QJsonObject{{"entries", m_entries.value(provider)}}, m_language))
-            messages.append(m_missing.value(provider));
+    for (const auto &target : m_active) {
+        if (!has_dictionary_meanings(QJsonObject{{"entries", m_entries.value(target.key())}}, m_language))
+            messages.append(m_missing.value(target.key()));
     }
+    if (m_options.targets.isEmpty())
+        messages.append(tr("Select a dictionary source and at least one definition language."));
     emit finished(result, messages.join('\n'), messages.isEmpty());
 }
 

@@ -21,9 +21,9 @@ QString single_article(const QVariantMap &sense) {
 }  // namespace
 
 LearningService::LearningService(QObject *parent, const QString &file_name,
-                                 QNetworkAccessManager *network)
+                                 QNetworkAccessManager *network, DictionaryProviders providers)
     : QObject(parent), m_network(network ? network : new QNetworkAccessManager(this)),
-      m_dictionary(new DictionaryLookup(m_network, this)),
+      m_dictionary(new DictionaryLookup(m_network, this, std::move(providers))),
       m_translator(new TranslationService(this, m_network)),
       m_store(file_name) {
     connect(m_translator, &TranslationService::error_occurred, this, &LearningService::set_message);
@@ -43,17 +43,13 @@ LearningService::LearningService(QObject *parent, const QString &file_name,
         QLocale::languageToCode(QLocale::system().language())).toString());
     if (m_target_language.isEmpty())
         m_target_language = "en";
-    m_dictionary_options.mode = m_settings.value("dictionary/mode", "freedictionary").toString();
-    if (m_dictionary_options.mode != "kaikki" && m_dictionary_options.mode != "freedictionary" && m_dictionary_options.mode != "both")
-        m_dictionary_options.mode = "freedictionary";
-    const auto edition = m_settings.value("dictionary/definition_language",
-        QLocale::languageToCode(QLocale::system().language())).toString();
-    for (const auto &option : definition_languages()) {
-        if (option.toMap().value("code").toString() == edition)
-            m_dictionary_options.edition = edition;
+    const QVariantList defaults{QVariantMap{{"provider", "freedictionary"}, {"languages", QStringList{"en"}}, {"fallback", false}}};
+    QString configuration_error;
+    if (!m_dictionary->configure(m_settings.value("dictionary/selection", defaults).toList(),
+            m_settings.value("dictionary/follow_forms", true).toBool(), m_dictionary_options,
+            m_dictionary_selection, configuration_error)) {
+        m_dictionary->configure(defaults, true, m_dictionary_options, m_dictionary_selection, configuration_error);
     }
-    m_dictionary_options.fallback = m_settings.value("dictionary/fallback", false).toBool();
-    m_dictionary_options.follow_forms = m_settings.value("dictionary/follow_forms", true).toBool();
     m_history_limit = qBound(0, m_settings.value("learning/history_limit", 1000).toInt(), 10000);
 
     const auto contents = m_store.load(m_history_limit);
@@ -101,51 +97,23 @@ QVariantList LearningService::language_options() const {
     return options;
 }
 
-QVariantList LearningService::dictionary_modes() const {
-    return {QVariantMap{{"code", "kaikki"}, {"name", tr("Kaikki")}},
-        QVariantMap{{"code", "freedictionary"}, {"name", tr("FreeDictionaryAPI")}},
-        QVariantMap{{"code", "both"}, {"name", tr("Both at once")}}};
-}
-
-void LearningService::set_dictionary_mode(const QString &mode) {
-    if (mode == dictionary_mode() || (mode != "kaikki" && mode != "freedictionary" && mode != "both"))
-        return;
-    clear();
-    m_dictionary_options.mode = mode;
-    m_settings.setValue("dictionary/mode", mode);
-    emit preferences_changed();
-}
-
-void LearningService::set_definition_language(const QString &language) {
-    if (language == definition_language())
-        return;
-    for (const auto &option : definition_languages()) {
-        if (option.toMap().value("code").toString() != language)
-            continue;
-        clear();
-        m_dictionary_options.edition = language;
-        m_settings.setValue("dictionary/definition_language", language);
-        emit preferences_changed();
-        return;
+bool LearningService::configure_dictionaries(const QVariantList &selection, bool follow_forms) {
+    DictionaryOptions options;
+    QVariantList normalized;
+    QString error;
+    if (!m_dictionary->configure(selection, follow_forms, options, normalized, error)) {
+        set_message(error);
+        return false;
     }
-}
-
-void LearningService::set_dictionary_fallback(bool enabled) {
-    if (enabled == dictionary_fallback())
-        return;
+    if (normalized == m_dictionary_selection && follow_forms == this->follow_forms())
+        return true;
     clear();
-    m_dictionary_options.fallback = enabled;
-    m_settings.setValue("dictionary/fallback", enabled);
+    m_dictionary_options = options;
+    m_dictionary_selection = normalized;
+    m_settings.setValue("dictionary/selection", normalized);
+    m_settings.setValue("dictionary/follow_forms", follow_forms);
     emit preferences_changed();
-}
-
-void LearningService::set_follow_forms(bool enabled) {
-    if (enabled == follow_forms())
-        return;
-    clear();
-    m_dictionary_options.follow_forms = enabled;
-    m_settings.setValue("dictionary/follow_forms", enabled);
-    emit preferences_changed();
+    return true;
 }
 
 void LearningService::set_source_language(const QString &language) {
@@ -204,8 +172,7 @@ void LearningService::remember_lookup(const QString &key, const QString &context
     }
     history.prepend(QVariantMap{{"key", key}, {"word", m_lookup_word},
         {"language", m_source_language}, {"context", context.trimmed()},
-        {"dictionary_mode", dictionary_mode()}, {"definition_language", definition_language()},
-        {"dictionary_fallback", dictionary_fallback()}, {"follow_forms", follow_forms()},
+        {"dictionary_selection", dictionary_selection()}, {"follow_forms", follow_forms()},
         {"summary", m_senses.value(0).toMap().value("definition").toString()},
         {"last_lookup", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}});
     auto cache = m_cache;
@@ -247,9 +214,7 @@ void LearningService::lookup(const QString &word, const QString &context) {
         return;
     }
     m_lookup_context = context;
-    m_lookup_key = m_source_language + ':' + m_lookup_word + '|' + dictionary_mode() + '|'
-        + definition_language() + '|' + (dictionary_fallback() ? "fallback" : "only") + '|'
-        + (follow_forms() ? "forms" : "exact");
+    m_lookup_key = DictionaryLookup::cache_key(m_source_language, m_lookup_word, m_dictionary_options);
     if (m_cache.contains(m_lookup_key)) {
         const auto data = m_cache.value(m_lookup_key).toObject();
         display_dictionary(data);
@@ -305,7 +270,7 @@ bool LearningService::save_word(const QString &id, const QString &word, const QS
         {"word", word.trimmed()}, {"language", m_source_language}, {"target_language", m_target_language},
         {"context", context.trimmed()}, {"meaning", meaning.trimmed()},
         {"translation", translation.trimmed()}, {"notes", notes.trimmed()}, {"updated", timestamp},
-        {"dictionary_mode", dictionary_mode()}, {"definition_language", definition_language()},
+        {"dictionary_selection", dictionary_selection()}, {"follow_forms", follow_forms()},
         {"created", existing >= 0 ? cards[existing].toMap().value("created").toString() : timestamp}};
     for (auto it = fields.constBegin(); it != fields.constEnd(); ++it)
         card.insert(it.key(), it.value());
