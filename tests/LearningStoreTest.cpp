@@ -1,0 +1,68 @@
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QTemporaryDir>
+#include <QtTest>
+
+#include "LearningStore.h"
+
+class LearningStoreTest : public QObject {
+    Q_OBJECT
+
+private slots:
+    void unreadable_store_is_never_overwritten_data() {
+        QTest::addColumn<QByteArray>("bytes");
+        QTest::newRow("invalid-json") << QByteArray("broken JSON");
+        QTest::newRow("non-object") << QByteArray("[]");
+        QTest::newRow("unsupported-version") << QByteArray(R"({"version":2,"cards":[],"dictionary_cache":{}})");
+        QTest::newRow("invalid-cards") << QByteArray(R"({"version":1,"cards":{},"dictionary_cache":{}})");
+        QTest::newRow("invalid-cache") << QByteArray(R"({"version":1,"cards":[],"dictionary_cache":[]})");
+        QTest::newRow("invalid-history") << QByteArray(R"({"version":1,"cards":[],"dictionary_cache":{},"dictionary_history":{}})");
+    }
+
+    void unreadable_store_is_never_overwritten() {
+        QFETCH(QByteArray, bytes);
+        QTemporaryDir directory;
+        QFile file(directory.filePath("words.json"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(bytes), bytes.size());
+        file.close();
+        showthis::LearningStore store(file.fileName());
+        store.load(1000);
+        QVERIFY(!store.error().isEmpty());
+        QVERIFY(!store.save({}, {}, {}));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), bytes);
+    }
+
+    void history_migration_retains_metadata() {
+        QTemporaryDir directory;
+        QFile file(directory.filePath("words.json"));
+        const QJsonObject card{{"id", "legacy"}, {"word", "Haus"}, {"custom", "keep"},
+            {"sense", QJsonObject{{"article", "das"}}}};
+        const QJsonObject cache{{"de:Haus", QJsonObject{}}, {"de:Baum", QJsonObject{}}};
+        const QJsonArray history{QJsonObject{{"key", "de:Haus"}, {"custom", "history metadata"}},
+            QJsonObject{{"key", "de:Haus"}}, QJsonObject{{"key", "missing"}}};
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QJsonDocument(QJsonObject{{"version", 1}, {"cards", QJsonArray{card}},
+            {"dictionary_cache", cache}, {"dictionary_history", history}, {"custom", "root metadata"}}).toJson());
+        file.close();
+
+        showthis::LearningStore store(file.fileName());
+        const auto contents = store.load(1);
+        QVERIFY(store.error().isEmpty());
+        QCOMPARE(contents.history.size(), 1);
+        QCOMPARE(contents.history[0].toMap().value("key").toString(), QString("de:Haus"));
+        QCOMPARE(contents.history[0].toMap().value("custom").toString(), QString("history metadata"));
+        QCOMPARE(contents.cache.size(), 1);
+        QCOMPARE(contents.cards[0].toMap().value("article").toString(), QString("das"));
+        QCOMPARE(contents.cards[0].toMap().value("custom").toString(), QString("keep"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto saved = QJsonDocument::fromJson(file.readAll()).object();
+        QCOMPARE(saved.value("custom").toString(), QString("root metadata"));
+        QCOMPARE(saved.value("dictionary_cache").toObject().size(), 1);
+    }
+};
+
+QTEST_GUILESS_MAIN(LearningStoreTest)
+#include "LearningStoreTest.moc"

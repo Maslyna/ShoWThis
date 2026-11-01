@@ -11,6 +11,7 @@
 namespace showthis {
 
 class ScreenshotProvider;
+class LearningService;
 
 class ShoWSurface : public QQuickView {
     Q_OBJECT
@@ -23,7 +24,8 @@ class ShoWSurface : public QQuickView {
     Q_PROPERTY(QString error READ error WRITE set_error NOTIFY errorChanged)
 
 public:
-    explicit ShoWSurface(QWindow *parent = nullptr);
+    // An injected service remains owned by the caller and must outlive the view.
+    explicit ShoWSurface(QWindow *parent = nullptr, LearningService *learning = nullptr);
     ~ShoWSurface() override;
 
     void set_image(const QImage &image, const QList<ocr::WordBox> &words = {});

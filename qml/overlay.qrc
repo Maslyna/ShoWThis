@@ -9,5 +9,10 @@
         <file>NotebookWordRow.qml</file>
         <file>NotebookSettings.qml</file>
         <file>NotebookLanguagePicker.qml</file>
+        <file>NotebookWordEditor.qml</file>
+        <file>NotebookDictionary.qml</file>
+        <file>NotebookCardEditor.qml</file>
+        <file>NotebookVocabulary.qml</file>
+        <file>NotebookHistory.qml</file>
     </qresource>
 </RCC>

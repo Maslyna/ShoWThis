@@ -6,6 +6,7 @@
 #include <QSettings>
 #include <QVariantList>
 #include <QUrl>
+#include "LearningStore.h"
 
 namespace showthis {
 
@@ -37,8 +38,8 @@ public:
     bool dictionary_busy() const { return !m_dictionary_reply.isNull(); }
     bool translation_busy() const { return !m_translation_reply.isNull(); }
     QString message() const { return m_message; }
-    QString storage_error() const { return m_storage_error; }
-    QString storage_path() const { return m_file_name; }
+    QString storage_error() const { return m_store.error(); }
+    QString storage_path() const { return m_store.file_name(); }
     QVariantList vocabulary() const { return m_cards; }
     QVariantList dictionary_history() const { return m_history; }
     int history_limit() const { return m_history_limit; }
@@ -60,6 +61,7 @@ public:
                              const QString &meaning, const QString &translation,
                              const QString &notes, int sense_index,
                              const QString &article = QStringLiteral("auto"));
+    Q_INVOKABLE QString format_word(const QString &word, const QString &article) const;
     Q_INVOKABLE bool remove_word(const QString &id);
     Q_INVOKABLE bool clear_history();
     Q_INVOKABLE bool export_anki(const QUrl &destination, const QStringList &card_ids = {});
@@ -77,20 +79,17 @@ private:
     void cancel(QPointer<QNetworkReply> &reply);
     bool write_store(const QVariantList &cards, const QJsonObject &cache, const QVariantList &history);
     void remember_lookup(const QString &key, const QString &context, const QJsonObject &data);
-    void trim_history(QVariantList &history, QJsonObject &cache, int limit) const;
     void display_dictionary(const QJsonObject &data);
     QNetworkAccessManager *m_network;
     QPointer<QNetworkReply> m_dictionary_reply;
     QPointer<QNetworkReply> m_translation_reply;
     QSettings m_settings;
-    QString m_file_name;
+    LearningStore m_store;
     QString m_source_language;
     QString m_target_language;
     bool m_deepl_pro = false;
     QString m_api_key;
     QString m_message;
-    QString m_storage_error;
-    bool m_store_readable = true;
     QVariantList m_senses;
     QVariantMap m_source;
     QString m_lookup_word;

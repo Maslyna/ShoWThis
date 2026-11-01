@@ -48,6 +48,11 @@ private slots:
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_settings_directory.path());
     }
 
+    void init() {
+        QSettings{}.clear();
+        qunsetenv("SHOWTHIS_DEEPL_API_KEY");
+    }
+
     void word_card_context_data() {
         QTest::addColumn<QSize>("size");
         QTest::newRow("desktop") << QSize(1000, 700);
@@ -68,7 +73,7 @@ private slots:
         showthis::LearningService service(nullptr, store.fileName());
         service.set_source_language(QStringLiteral("de"));
         service.set_target_language(QStringLiteral("uk"));
-        showthis::ShoWSurface surface;
+        showthis::ShoWSurface surface(nullptr, &service);
         QCOMPARE(surface.status(), QQuickView::Ready);
         QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
         surface.resize(size);
@@ -83,7 +88,6 @@ private slots:
         auto *word = find_item(surface.contentItem(), QStringLiteral("lookup_word"));
         auto *context = find_item(surface.contentItem(), QStringLiteral("word_context"));
         QVERIFY(panel);
-        panel->setProperty("service", QVariant::fromValue(&service));
         QVERIFY(word);
         QVERIFY(context);
         QTRY_VERIFY(panel->isVisible());
@@ -231,7 +235,7 @@ private slots:
         }
         QTemporaryDir directory;
         showthis::LearningService service(nullptr, directory.filePath(QStringLiteral("words.json")));
-        showthis::ShoWSurface surface;
+        showthis::ShoWSurface surface(nullptr, &service);
         QCOMPARE(surface.status(), QQuickView::Ready);
         QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
         surface.resize(size);
@@ -239,7 +243,6 @@ private slots:
         QVERIFY(QTest::qWaitForWindowExposed(&surface));
         auto *panel = find_item(surface.contentItem(), QStringLiteral("learning_panel"));
         QVERIFY(panel);
-        panel->setProperty("service", QVariant::fromValue(&service));
         QVERIFY(QMetaObject::invokeMethod(panel, "open_word",
             Q_ARG(QString, QStringLiteral("Verantwortungsbewusstsein")),
             Q_ARG(QString, QStringLiteral("Das zeigt ein hohes Verantwortungsbewusstsein."))));
@@ -307,10 +310,53 @@ private slots:
         QCOMPARE(warnings.size(), 0);
     }
 
+    void ordinary_word_editing_without_analysis() {
+        QTemporaryDir directory;
+        showthis::LearningService service(nullptr, directory.filePath(QStringLiteral("words.json")));
+        service.set_source_language(QStringLiteral("de"));
+        showthis::ShoWSurface surface(nullptr, &service);
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
+        surface.resize(1100, 800);
+        auto *panel = find_item(surface.contentItem(), QStringLiteral("learning_panel"));
+        QVERIFY(panel);
+        const auto observed = QString::fromUtf8("Häusern");
+        const auto context = QString::fromUtf8("Wir wohnen in den Häusern.");
+        QImage image(1100, 800, QImage::Format_RGB32);
+        image.fill(Qt::white);
+        surface.set_image(image, {{observed, QRect(100, 200, 100, 30), context}});
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier, QPoint(140, 215));
+        auto *word = find_item(surface.contentItem(), QStringLiteral("lookup_word"));
+        auto *meaning = find_item(surface.contentItem(), QStringLiteral("word_meaning"));
+        auto *save = find_item(surface.contentItem(), QStringLiteral("save_word"));
+        QVERIFY(word);
+        QVERIFY(meaning);
+        QVERIFY(save);
+        QVERIFY(!find_item(surface.contentItem(), QStringLiteral("dictionary_form")));
+        QVERIFY(!find_item(surface.contentItem(), QStringLiteral("suggest_lemma")));
+        QCOMPARE(word->property("text").toString(), observed);
+        word->setProperty("text", QStringLiteral("Haus"));
+        QVERIFY(QMetaObject::invokeMethod(word, "textEdited"));
+        meaning->setProperty("text", QStringLiteral("house"));
+        QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+        QCOMPARE(service.vocabulary().size(), 1);
+        const auto card = service.vocabulary()[0].toMap();
+        QCOMPARE(card.value("word").toString(), QStringLiteral("Haus"));
+        QCOMPARE(card.value("context").toString(), context);
+        QVERIFY(!card.contains("lemma"));
+        QVERIFY(!card.contains("linguistics"));
+        QVERIFY(QMetaObject::invokeMethod(panel, "edit_card", Q_ARG(QVariant, QVariant(card))));
+        QCOMPARE(word->property("text").toString(), QStringLiteral("Haus"));
+        QVERIFY(!panel->property("dirty").toBool());
+        QCOMPARE(warnings.size(), 0);
+    }
+
     void flexible_language_controls() {
         QTemporaryDir directory;
         showthis::LearningService service(nullptr, directory.filePath(QStringLiteral("words.json")));
-        showthis::ShoWSurface surface;
+        showthis::ShoWSurface surface(nullptr, &service);
         QCOMPARE(surface.status(), QQuickView::Ready);
         QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
         surface.resize(1100, 800);
@@ -318,7 +364,6 @@ private slots:
         QVERIFY(QTest::qWaitForWindowExposed(&surface));
         auto *panel = find_item(surface.contentItem(), QStringLiteral("learning_panel"));
         QVERIFY(panel);
-        panel->setProperty("service", QVariant::fromValue(&service));
         QVERIFY(QMetaObject::invokeMethod(panel, "open_word", Q_ARG(QString, QStringLiteral("maison")),
             Q_ARG(QString, QStringLiteral("Voici ma maison."))));
         auto *source = find_item(surface.contentItem(), QStringLiteral("lookup_language"));

@@ -6,6 +6,14 @@
 #include <QQuickImageProvider>
 #include <QReadWriteLock>
 
+static void init_overlay_resources() {
+    static const bool initialized = []() {
+        Q_INIT_RESOURCE(overlay);
+        return true;
+    }();
+    Q_UNUSED(initialized);
+}
+
 namespace showthis {
 
 class ScreenshotProvider : public QQuickImageProvider {
@@ -29,13 +37,16 @@ private:
     QImage m_image;
 };
 
-ShoWSurface::ShoWSurface(QWindow *parent)
+ShoWSurface::ShoWSurface(QWindow *parent, LearningService *learning)
     : QQuickView(parent), m_provider(new ScreenshotProvider) {
+    init_overlay_resources();
     setResizeMode(QQuickView::SizeRootObjectToView);
     engine()->addImageProvider(QStringLiteral("screenshot"), m_provider);
     rootContext()->setContextProperty(QStringLiteral("overlay"), this);
-    auto *learning = new LearningService(this);
-    learning->setObjectName(QStringLiteral("learning_service"));
+    if (!learning) {
+        learning = new LearningService(this);
+        learning->setObjectName(QStringLiteral("learning_service"));
+    }
     rootContext()->setContextProperty(QStringLiteral("learning"), learning);
     setSource(QUrl(QStringLiteral("qrc:/qml/Overlay.qml")));
 }

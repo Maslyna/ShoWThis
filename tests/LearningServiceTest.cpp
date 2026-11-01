@@ -239,8 +239,8 @@ static QByteArray dictionary_response() {
 QTEST_GUILESS_MAIN(LearningServiceTest)
 
 void LearningServiceTest::init() {
-    QSettings settings;
-    settings.setValue("learning/history_limit", 1000);
+    QSettings{}.clear();
+    qunsetenv("SHOWTHIS_DEEPL_API_KEY");
 }
 
 void LearningServiceTest::history_limit_and_recency() {
@@ -552,4 +552,63 @@ void LearningServiceTest::flexible_languages() {
     showthis::LearningService reopened(nullptr, directory.filePath("words.json"));
     QCOMPARE(reopened.source_language(), QString("ja"));
     QCOMPARE(reopened.target_language(), QString("pt-br"));
+}
+
+void LearningServiceTest::retired_metadata_is_preserved() {
+    QTemporaryDir directory;
+    const auto path = directory.filePath("words.json");
+    const auto observed = QString::fromUtf8("Häusern");
+    const auto context = QString::fromUtf8("In den Häusern wohnen Menschen.");
+    const QVariantMap linguistics{{"provider", "spaCy"}, {"model", "test_model"},
+        {"part_of_speech", "NOUN"}, {"features", QVariantMap{{"Case", "Dat"}, {"Number", "Plur"}}}};
+    const QVariantMap card{{"id", "legacy"}, {"word", "Haus"}, {"language", "de"},
+        {"context", context}, {"meaning", "house"}, {"article", "das"},
+        {"original_word", observed}, {"lemma", "Haus"}, {"lemma_confirmed", true},
+        {"linguistics", linguistics}, {"custom_field", "keep me"}, {"created", "2026-01-01"}};
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(QJsonDocument(QJsonObject{{"version", 1}, {"cards", QJsonArray{QJsonObject::fromVariantMap(card)}},
+        {"dictionary_cache", QJsonObject{}}, {"custom_root", "also keep me"}}).toJson());
+    file.close();
+
+    showthis::LearningService service(nullptr, path);
+    service.set_source_language("de");
+    QVERIFY(service.save_word("legacy", "Haus", context, "home", "", "updated note", -1));
+    // Retired metadata is opaque: it must not prevent ordinary word editing.
+    QVERIFY(service.save_word("legacy", "Häuschen", context, "small house", "", "updated", -1));
+    showthis::LearningService reopened(nullptr, path);
+    const auto updated = reopened.vocabulary()[0].toMap();
+    for (const auto &key : {"original_word", "lemma", "lemma_confirmed", "linguistics", "custom_field", "created"})
+        QCOMPARE(updated.value(key), card.value(key));
+    QCOMPARE(updated.value("word").toString(), QString::fromUtf8("Häuschen"));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(QJsonDocument::fromJson(file.readAll()).object().value("custom_root").toString(), QString("also keep me"));
+    const auto destination = QUrl::fromLocalFile(directory.filePath("anki.txt"));
+    QVERIFY(reopened.export_anki(destination));
+    QFile exported(destination.toLocalFile());
+    QVERIFY(exported.open(QIODevice::ReadOnly));
+    const auto data = exported.readAll();
+    QVERIFY(!data.contains("Dictionary form:"));
+    QVERIFY(!data.contains("Observed form:"));
+    QVERIFY(!data.contains("Case=Dat"));
+    QVERIFY(!data.contains("test_model"));
+    QVERIFY(service.metaObject()->indexOfProperty("lemmatizer") < 0);
+}
+
+void LearningServiceTest::failed_write_does_not_commit_changes() {
+    QTemporaryDir directory;
+    const auto path = directory.filePath("blocked/words.json");
+    QFile blocker(directory.filePath("blocked"));
+    QVERIFY(blocker.open(QIODevice::WriteOnly));
+    blocker.close();
+    showthis::LearningService service(nullptr, path);
+    QVERIFY(!service.save_word({}, "word", "", "meaning", "", "", -1));
+    QVERIFY(service.vocabulary().isEmpty());
+    QVERIFY(!service.storage_error().isEmpty());
+    service.set_history_limit(2);
+    QCOMPARE(service.history_limit(), 1000);
+    QVERIFY(blocker.remove());
+    QVERIFY(service.save_word({}, "word", "", "meaning", "", "", -1));
+    QCOMPARE(service.vocabulary().size(), 1);
+    QVERIFY(service.storage_error().isEmpty());
 }

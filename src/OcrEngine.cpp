@@ -100,9 +100,9 @@ QList<WordBox> OcrEngine::scan_image(const QImage &img) {
             if (char *text = it->GetUTF8Text(tesseract::RIL_WORD)) {
                 int x1, y1, x2, y2;
                 it->BoundingBox(tesseract::RIL_WORD, &x1, &y1, &x2, &y2);
-
+                const auto word_text = QString::fromUtf8(text).trimmed();
                 res.append({
-                    QString::fromUtf8(text),
+                    word_text,
                     qrect_from_tesseract_coord(x1, y1, x2, y2),
                     context,
                 });

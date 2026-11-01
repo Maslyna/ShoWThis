@@ -5,14 +5,10 @@ import QtQuick.Layouts
 ItemDelegate {
     id: row
     required property var entry
+    required property var service
     property bool is_history: false
     property bool selected: false
-    readonly property string display_word: {
-        const prefix = (entry.article || "").trim()
-        if (prefix.length === 0) return entry.word
-        const joined = /['’\-]$/.test(prefix) ? prefix : prefix + " "
-        return entry.word.toLowerCase().startsWith(joined.toLowerCase()) ? entry.word : joined + entry.word
-    }
+    readonly property string display_word: service.format_word(entry.word, entry.article || "")
     signal open_requested()
     signal selection_toggled(bool checked)
     signal delete_requested()

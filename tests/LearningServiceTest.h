@@ -22,6 +22,8 @@ private slots:
     void dictionary_grammar();
     void article_persistence_and_legacy_cards();
     void flexible_languages();
+    void retired_metadata_is_preserved();
+    void failed_write_does_not_commit_changes();
 
 private:
     QTemporaryDir m_settings_directory;
