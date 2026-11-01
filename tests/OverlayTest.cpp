@@ -737,10 +737,21 @@ private slots:
         QCOMPARE(warnings.size(), 0);
     }
 
-    void escape_hides_overlay_and_preserves_draft() {
+    void escape_closes_notebook_before_hiding_overlay_data() {
+        QTest::addColumn<QSize>("size");
+        QTest::newRow("desktop") << QSize(1000, 700);
+        QTest::newRow("compact") << QSize(640, 700);
+    }
+
+    void escape_closes_notebook_before_hiding_overlay() {
+        QFETCH(QSize, size);
         showthis::ShoWSurface surface;
         QCOMPARE(surface.status(), QQuickView::Ready);
-        surface.resize(1000, 700);
+        surface.resize(size);
+        QImage screenshot(size, QImage::Format_RGB32);
+        screenshot.fill(Qt::white);
+        surface.set_image(screenshot);
+        const auto image_source = surface.image_source();
         TestCaptureBackend backend;
         showthis::OverlayController controller(surface, backend,
             [](const QImage &, const QString &) { return showthis::ScanResult{}; });
@@ -755,7 +766,17 @@ private slots:
         auto *meaning = find_item(surface.contentItem(), QStringLiteral("word_meaning"));
         QVERIFY(meaning);
         meaning->setProperty("text", QStringLiteral("Keep this unsaved meaning"));
+        panel->setProperty("compact_page", 1);
         meaning->forceActiveFocus();
+        QTest::keyClick(&surface, Qt::Key_Escape);
+        QTRY_VERIFY(!panel->isVisible());
+        QVERIFY(surface.isVisible());
+        QCOMPARE(hide_requests.size(), 0);
+        QCOMPARE(surface.image_source(), image_source);
+        QTRY_VERIFY(surface.rootObject()->hasActiveFocus());
+        QVERIFY(panel->property("dirty").toBool());
+        QCOMPARE(meaning->property("text").toString(), QStringLiteral("Keep this unsaved meaning"));
+
         QTest::keyClick(&surface, Qt::Key_Escape);
         QTRY_VERIFY(!surface.isVisible());
         QCOMPARE(hide_requests.size(), 1);
@@ -764,8 +785,12 @@ private slots:
 
         controller.show_notebook();
         QTRY_VERIFY(surface.isVisible());
+        QVERIFY(panel->isVisible());
         QCOMPARE(meaning->property("text").toString(), QStringLiteral("Keep this unsaved meaning"));
-        panel->setVisible(false);
+        QTest::keyClick(&surface, Qt::Key_Escape);
+        QTRY_VERIFY(!panel->isVisible());
+        QVERIFY(surface.isVisible());
+        QCOMPARE(hide_requests.size(), 1);
         auto *hide_button = find_item(surface.contentItem(), QStringLiteral("hide_overlay"));
         QVERIFY(hide_button);
         QTest::qWait(30);

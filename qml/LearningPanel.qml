@@ -170,7 +170,7 @@ Pane {
                     objectName: "hide_notebook"
                     Accessible.name: qsTr("Back to screen")
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("Back to screen\nYour draft stays open")
+                    ToolTip.text: qsTr("Back to screen · Esc\nYour draft stays open")
                     onClicked: panel.visible = false
                 }
             }

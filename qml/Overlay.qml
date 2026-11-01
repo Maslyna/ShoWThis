@@ -5,7 +5,15 @@ import QtQuick.Layouts
 Item {
     id: root
     focus: true
-    Keys.onEscapePressed: overlay.hide_requested()
+    Keys.onEscapePressed: function(event) {
+        if (learning_panel.visible) {
+            learning_panel.visible = false
+            root.forceActiveFocus()
+        } else {
+            overlay.hide_requested()
+        }
+        event.accepted = true
+    }
     width: 1280
     height: 720
 
