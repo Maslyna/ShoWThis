@@ -18,6 +18,7 @@
 #include "OverlayController.h"
 #include "AScreenCaptureBackend.h"
 #include "TestNetwork.h"
+#include "DictionaryFixtures.h"
 
 class TestCaptureBackend : public showthis::AScreenCaptureBackend {
 public:
@@ -51,6 +52,7 @@ private slots:
 
     void init() {
         QSettings{}.clear();
+        QSettings{}.setValue("dictionary/definition_language", "en");
     }
 
     void word_card_context_data() {
@@ -72,7 +74,7 @@ private slots:
         QFile store(directory.filePath(QStringLiteral("vocabulary.json")));
         QVERIFY(store.open(QIODevice::WriteOnly));
         store.write(QJsonDocument(QJsonObject{{"version", 1}, {"cards", QJsonArray{}},
-            {"dictionary_cache", QJsonObject{{"de:Haus", data}}}}).toJson());
+            {"dictionary_cache", QJsonObject{{"de:Haus|freedictionary|en|only|forms", data}}}}).toJson());
         store.close();
         showthis::LearningService service(nullptr, store.fileName());
         service.set_source_language(QStringLiteral("de"));
@@ -359,6 +361,79 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(panel, "edit_card", Q_ARG(QVariant, QVariant(card))));
         QCOMPARE(word->property("text").toString(), QStringLiteral("Haus"));
         QVERIFY(!panel->property("dirty").toBool());
+        QCOMPARE(warnings.size(), 0);
+    }
+
+    void dictionary_sources_and_native_headwords_data() {
+        QTest::addColumn<QSize>("size");
+        QTest::newRow("desktop") << QSize(1100, 800);
+        QTest::newRow("compact") << QSize(640, 700);
+    }
+
+    void dictionary_sources_and_native_headwords() {
+        QFETCH(QSize, size);
+        QTemporaryDir directory;
+        TestNetwork network;
+        const auto observed = QString::fromUtf8("Häuser");
+        network.responder = [&](const QNetworkRequest &request) -> TestNetwork::Response {
+            if (request.url().host() == "freedictionaryapi.com") return {free_entry("Haus", "house")};
+            const auto word = request.url().path().contains(QString::fromUtf8("hä"))
+                || request.url().path().endsWith(observed + ".jsonl") ? observed : QString("Haus");
+            if (request.url().path().endsWith(".json")) return {kaikki_index(word, "ru")};
+            return {kaikki_entry(word, word == observed ? QString::fromUtf8("форма Haus") : QString::fromUtf8("дом"),
+                "de", word == observed ? QString("Haus") : QString{})};
+        };
+        showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
+        service.set_source_language("de");
+        showthis::ShoWSurface surface(nullptr, &service);
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
+        surface.resize(size);
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        auto *panel = find_item(surface.contentItem(), "learning_panel");
+        QVERIFY(panel);
+        QVERIFY(QMetaObject::invokeMethod(panel, "open_word", Q_ARG(QString, observed), Q_ARG(QString, QString("der Häuser"))));
+        auto *mode = find_item(surface.contentItem(), "dictionary_mode");
+        auto *edition = find_item(surface.contentItem(), "definition_language");
+        auto *lookup = find_item(surface.contentItem(), "lookup_dictionary");
+        auto *word = find_item(surface.contentItem(), "lookup_word");
+        auto *meaning = find_item(surface.contentItem(), "word_meaning");
+        auto *save = find_item(surface.contentItem(), "save_word");
+        auto *both = find_item(surface.contentItem(), "search_both_dictionaries");
+        QVERIFY(mode);
+        QVERIFY(edition);
+        QVERIFY(lookup);
+        QVERIFY(word);
+        QVERIFY(meaning);
+        QVERIFY(save);
+        QVERIFY(both);
+        mode->setProperty("currentIndex", 0); // Kaikki
+        QVERIFY(QMetaObject::invokeMethod(mode, "activated", Q_ARG(int, 0)));
+        QCOMPARE(service.dictionary_mode(), QString("kaikki"));
+        QVERIFY(edition->isVisible());
+        edition->setProperty("currentIndex", 1); // Russian definition language
+        QVERIFY(QMetaObject::invokeMethod(edition, "activated", Q_ARG(int, 1)));
+        QCOMPARE(service.definition_language(), QString("ru"));
+        QCOMPARE(service.source_language(), QString("de"));
+        QVERIFY(network.requests.isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(lookup, "clicked"));
+        QTRY_VERIFY(!service.dictionary_busy());
+        QCOMPARE(service.senses().size(), 2);
+        QTRY_VERIFY(find_item(surface.contentItem(), "dictionary_sense_1"));
+        auto *resolved = find_item(surface.contentItem(), "dictionary_sense_1");
+        QVERIFY(QMetaObject::invokeMethod(resolved, "clicked"));
+        QCOMPARE(word->property("text").toString(), QString("Haus"));
+        QCOMPARE(meaning->property("text").toString(), QString::fromUtf8("дом"));
+        QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+        QCOMPARE(service.vocabulary()[0].toMap().value("source").toMap().value("name").toString(), QString("Kaikki.org"));
+        QVERIFY(QMetaObject::invokeMethod(both, "clicked"));
+        QTRY_VERIFY(!service.dictionary_busy());
+        QCOMPARE(service.dictionary_mode(), QString("both"));
+        QCOMPARE(service.senses().size(), 2);
+        QVERIFY(!both->isVisible());
+        QCOMPARE(service.senses()[0].toMap().value("definition_language").toString(), QString("ru"));
+        QCOMPARE(service.senses()[1].toMap().value("definition_language").toString(), QString("en"));
         QCOMPARE(warnings.size(), 0);
     }
 

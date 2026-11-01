@@ -1,7 +1,8 @@
 # Notebook structure
 
-The notebook has no Python runtime, language models, or lemma-analysis feature.
-Words can still be edited normally before dictionary lookup or saving.
+The notebook has no Python runtime or predictive language models. It follows
+explicit dictionary links from inflected words to headwords; words can also be
+edited normally before lookup or saving.
 
 ## UI
 
@@ -10,6 +11,8 @@ Words can still be edited normally before dictionary lookup or saving.
   card suppresses dirty tracking; opening another card goes through the panel's
   unsaved-change confirmation.
 - `NotebookDictionary.qml` displays dictionary results.
+- `NotebookDictionaryOptions.qml` selects sources, Kaikki definition language,
+  fallback search, and whether to follow base-form links.
 - `NotebookCardEditor.qml` edits the personal meaning, translation, prefix, and notes.
 - `NotebookVocabulary.qml` owns saved-word search and export selection.
 - `NotebookHistory.qml` displays and searches recent lookups.
@@ -25,6 +28,9 @@ for tests; the caller retains ownership of an injected service.
 
 - `LearningService` exposes notebook operations and observable state to QML and
   coordinates dictionary requests and optional translation.
+- `DictionaryLookup` queries FreeDictionaryAPI and Kaikki independently or in
+  parallel, follows bounded dictionary references, and cancels obsolete requests.
+- `DictionaryData` normalizes the providers' formats and explicit form-of links.
 - `TranslationService` owns provider selection, configuration, request lifecycle,
   and translated text. It defaults to no translator. Translation fields and
   actions are hidden until the selected provider is configured.

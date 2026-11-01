@@ -38,6 +38,11 @@ void append_senses(const QJsonArray &senses, const QJsonObject &entry,
             item.insert("part_of_speech", entry.value("partOfSpeech").toString());
             item.insert("pronunciation", pronunciations.join(" · "));
             item.insert("forms", entry.value("forms").toArray().toVariantList());
+            item.insert("headword", entry.value("headword").toString());
+            item.insert("observed_word", entry.value("observed_word").toString());
+            item.insert("provider", entry.value("provider").toString());
+            item.insert("definition_language", entry.value("definition_language").toString());
+            item.insert("source", entry.value("source").toObject().toVariantMap());
             auto articles = sense.value("articles").toVariant().toStringList();
             if (articles.isEmpty() && !sense.value("article").toString().isEmpty())
                 articles.append(sense.value("article").toString());
@@ -78,7 +83,15 @@ QString word_with_article(const QString &word, const QString &article) {
 QVariantList dictionary_senses(const QJsonObject &data, const QString &language) {
     QVariantList result;
     for (const auto &value : data.value("entries").toArray()) {
-        const auto entry = value.toObject();
+        auto entry = value.toObject();
+        if (!entry.contains("source"))
+            entry.insert("source", data.value("source"));
+        if (!entry.contains("headword"))
+            entry.insert("headword", data.value("word"));
+        if (!entry.contains("provider"))
+            entry.insert("provider", "freedictionary");
+        if (!entry.contains("definition_language"))
+            entry.insert("definition_language", "en");
         if (normalized_language_code(entry.value("language").toObject().value("code").toString()) == language)
             append_senses(entry.value("senses").toArray(), entry, result);
     }

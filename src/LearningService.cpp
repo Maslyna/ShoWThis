@@ -4,8 +4,6 @@
 
 #include <QDateTime>
 #include <QJsonDocument>
-#include <QNetworkReply>
-#include <QNetworkRequest>
 #include <QUuid>
 #include <QSet>
 #include <QLocale>
@@ -20,27 +18,24 @@ QString single_article(const QVariantMap &sense) {
     return sense.value("article").toString();
 }
 
-QString request_error(QNetworkReply *reply, const QString &service) {
-    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    if (status == 404)
-        return QObject::tr("No dictionary entry found. Check the spelling or correct the OCR text.");
-    if (status == 429)
-        return QObject::tr("%1 rate limit reached. Please try again later.").arg(service);
-    if (status == 400)
-        return QObject::tr("%1 rejected the request. Check the language codes and whether this language pair is supported.").arg(service);
-    return QObject::tr("%1 request failed (%2). Check your connection or try again later.")
-        .arg(service).arg(status);
-}
-
 }  // namespace
 
 LearningService::LearningService(QObject *parent, const QString &file_name,
                                  QNetworkAccessManager *network)
     : QObject(parent), m_network(network ? network : new QNetworkAccessManager(this)),
+      m_dictionary(new DictionaryLookup(m_network, this)),
       m_translator(new TranslationService(this, m_network)),
       m_store(file_name) {
     connect(m_translator, &TranslationService::error_occurred, this, &LearningService::set_message);
     connect(m_translator, &TranslationService::configuration_changed, this, [this]() { set_message({}); });
+    connect(m_dictionary, &DictionaryLookup::finished, this,
+        [this](const QJsonObject &data, const QString &message, bool cacheable) {
+            display_dictionary(data);
+            if (!message.isEmpty())
+                set_message(message);
+            if (cacheable && !m_senses.isEmpty())
+                remember_lookup(m_lookup_key, m_lookup_context, data);
+        });
     m_source_language = normalized_language_code(m_settings.value("learning/source_language", "en").toString());
     if (m_source_language.isEmpty())
         m_source_language = "en";
@@ -48,6 +43,17 @@ LearningService::LearningService(QObject *parent, const QString &file_name,
         QLocale::languageToCode(QLocale::system().language())).toString());
     if (m_target_language.isEmpty())
         m_target_language = "en";
+    m_dictionary_options.mode = m_settings.value("dictionary/mode", "freedictionary").toString();
+    if (m_dictionary_options.mode != "kaikki" && m_dictionary_options.mode != "freedictionary" && m_dictionary_options.mode != "both")
+        m_dictionary_options.mode = "freedictionary";
+    const auto edition = m_settings.value("dictionary/definition_language",
+        QLocale::languageToCode(QLocale::system().language())).toString();
+    for (const auto &option : definition_languages()) {
+        if (option.toMap().value("code").toString() == edition)
+            m_dictionary_options.edition = edition;
+    }
+    m_dictionary_options.fallback = m_settings.value("dictionary/fallback", false).toBool();
+    m_dictionary_options.follow_forms = m_settings.value("dictionary/follow_forms", true).toBool();
     m_history_limit = qBound(0, m_settings.value("learning/history_limit", 1000).toInt(), 10000);
 
     const auto contents = m_store.load(m_history_limit);
@@ -61,22 +67,14 @@ void LearningService::set_message(const QString &message) {
     emit message_changed();
 }
 
-void LearningService::cancel(QPointer<QNetworkReply> &reply) {
-    if (!reply)
-        return;
-    auto *pending = reply.data();
-    reply.clear();
-    pending->disconnect(this);
-    pending->abort();
-    pending->deleteLater();
-}
-
 void LearningService::clear() {
-    cancel(m_dictionary_reply);
+    m_dictionary->cancel();
     m_translator->clear();
     m_senses.clear();
     m_source.clear();
     m_lookup_word.clear();
+    m_lookup_context.clear();
+    m_lookup_key.clear();
     set_message({});
     emit lookup_changed();
 }
@@ -101,6 +99,53 @@ QVariantList LearningService::language_options() const {
         return result;
     }();
     return options;
+}
+
+QVariantList LearningService::dictionary_modes() const {
+    return {QVariantMap{{"code", "kaikki"}, {"name", tr("Kaikki")}},
+        QVariantMap{{"code", "freedictionary"}, {"name", tr("FreeDictionaryAPI")}},
+        QVariantMap{{"code", "both"}, {"name", tr("Both at once")}}};
+}
+
+void LearningService::set_dictionary_mode(const QString &mode) {
+    if (mode == dictionary_mode() || (mode != "kaikki" && mode != "freedictionary" && mode != "both"))
+        return;
+    clear();
+    m_dictionary_options.mode = mode;
+    m_settings.setValue("dictionary/mode", mode);
+    emit preferences_changed();
+}
+
+void LearningService::set_definition_language(const QString &language) {
+    if (language == definition_language())
+        return;
+    for (const auto &option : definition_languages()) {
+        if (option.toMap().value("code").toString() != language)
+            continue;
+        clear();
+        m_dictionary_options.edition = language;
+        m_settings.setValue("dictionary/definition_language", language);
+        emit preferences_changed();
+        return;
+    }
+}
+
+void LearningService::set_dictionary_fallback(bool enabled) {
+    if (enabled == dictionary_fallback())
+        return;
+    clear();
+    m_dictionary_options.fallback = enabled;
+    m_settings.setValue("dictionary/fallback", enabled);
+    emit preferences_changed();
+}
+
+void LearningService::set_follow_forms(bool enabled) {
+    if (enabled == follow_forms())
+        return;
+    clear();
+    m_dictionary_options.follow_forms = enabled;
+    m_settings.setValue("dictionary/follow_forms", enabled);
+    emit preferences_changed();
 }
 
 void LearningService::set_source_language(const QString &language) {
@@ -159,6 +204,8 @@ void LearningService::remember_lookup(const QString &key, const QString &context
     }
     history.prepend(QVariantMap{{"key", key}, {"word", m_lookup_word},
         {"language", m_source_language}, {"context", context.trimmed()},
+        {"dictionary_mode", dictionary_mode()}, {"definition_language", definition_language()},
+        {"dictionary_fallback", dictionary_fallback()}, {"follow_forms", follow_forms()},
         {"summary", m_senses.value(0).toMap().value("definition").toString()},
         {"last_lookup", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}});
     auto cache = m_cache;
@@ -173,7 +220,7 @@ void LearningService::remember_lookup(const QString &key, const QString &context
 
 bool LearningService::clear_history() {
     // Do not let an already-running lookup repopulate history after clearing.
-    cancel(m_dictionary_reply);
+    m_dictionary->cancel();
     emit lookup_changed();
     if (!write_store(m_cards, {}, {}))
         return false;
@@ -199,47 +246,19 @@ void LearningService::lookup(const QString &word, const QString &context) {
         set_message(tr("Enter a word first."));
         return;
     }
-    const auto cache_key = m_source_language + ":" + m_lookup_word;
-    if (m_cache.contains(cache_key)) {
-        const auto data = m_cache.value(cache_key).toObject();
+    m_lookup_context = context;
+    m_lookup_key = m_source_language + ':' + m_lookup_word + '|' + dictionary_mode() + '|'
+        + definition_language() + '|' + (dictionary_fallback() ? "fallback" : "only") + '|'
+        + (follow_forms() ? "forms" : "exact");
+    if (m_cache.contains(m_lookup_key)) {
+        const auto data = m_cache.value(m_lookup_key).toObject();
         display_dictionary(data);
-        remember_lookup(cache_key, context, data);
+        remember_lookup(m_lookup_key, context, data);
         set_message(tr("Loaded from local dictionary cache."));
         return;
     }
-    const auto url = QUrl::fromEncoded("https://freedictionaryapi.com/api/v1/entries/"
-        + m_source_language.toUtf8() + "/" + QUrl::toPercentEncoding(m_lookup_word)
-        + "?translations=true");
-    QNetworkRequest request(url);
-    request.setTransferTimeout(15000);
-    request.setRawHeader("User-Agent", "ShoWThis/1.0 (personal vocabulary learner)");
-    auto *reply = m_network->get(request);
-    m_dictionary_reply = reply;
+    m_dictionary->lookup(m_lookup_word, m_source_language, m_dictionary_options);
     emit lookup_changed();
-    connect(reply, &QNetworkReply::finished, this, [this, reply, cache_key, context]() {
-        if (m_dictionary_reply != reply) {
-            reply->deleteLater();
-            return;
-        }
-        m_dictionary_reply.clear();
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            set_message(request_error(reply, tr("Dictionary")));
-            emit lookup_changed();
-            return;
-        }
-        QJsonParseError error;
-        const auto document = QJsonDocument::fromJson(reply->readAll(), &error);
-        const auto data = document.object();
-        if (error.error != QJsonParseError::NoError || !data.value("entries").isArray()) {
-            set_message(tr("The dictionary returned an invalid response."));
-            emit lookup_changed();
-            return;
-        }
-        display_dictionary(data);
-        if (!m_senses.isEmpty())
-            remember_lookup(cache_key, context, data);
-    });
 }
 
 void LearningService::translate(const QString &word, const QString &context) {
@@ -286,13 +305,17 @@ bool LearningService::save_word(const QString &id, const QString &word, const QS
         {"word", word.trimmed()}, {"language", m_source_language}, {"target_language", m_target_language},
         {"context", context.trimmed()}, {"meaning", meaning.trimmed()},
         {"translation", translation.trimmed()}, {"notes", notes.trimmed()}, {"updated", timestamp},
+        {"dictionary_mode", dictionary_mode()}, {"definition_language", definition_language()},
         {"created", existing >= 0 ? cards[existing].toMap().value("created").toString() : timestamp}};
     for (auto it = fields.constBegin(); it != fields.constEnd(); ++it)
         card.insert(it.key(), it.value());
-    const bool matching = word.trimmed() == m_lookup_word && !m_source.isEmpty();
+    const auto selected_sense = sense_index >= 0 && sense_index < m_senses.size() ? m_senses[sense_index].toMap() : QVariantMap{};
+    const bool matching = !m_source.isEmpty() && (word.trimmed() == m_lookup_word
+        || selected_sense.value("headword").toString() == word.trimmed());
     const bool unchanged = old.value("word").toString() == word.trimmed()
         && old.value("language").toString() == m_source_language;
-    card.insert("source", matching ? m_source : unchanged ? old.value("source").toMap() : QVariantMap{});
+    card.insert("source", matching ? selected_sense.value("source", m_source).toMap()
+        : unchanged ? old.value("source").toMap() : QVariantMap{});
     card.insert("sense", matching && sense_index >= 0 && sense_index < m_senses.size()
         ? m_senses[sense_index].toMap() : unchanged ? old.value("sense").toMap() : QVariantMap{});
     const auto word_prefix = article != "auto" ? article.trimmed()

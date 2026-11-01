@@ -20,6 +20,8 @@ qt_add_library(showthis_core STATIC
     src/LearningService.h src/LearningService.cpp
     src/LearningStore.h src/LearningStore.cpp
     src/NotebookData.h src/NotebookData.cpp
+    src/DictionaryData.h src/DictionaryData.cpp
+    src/DictionaryLookup.h src/DictionaryLookup.cpp
     src/AnkiExporter.h src/AnkiExporter.cpp
     src/TranslationProvider.h src/TranslationProviders.cpp
     src/TranslationService.h src/TranslationService.cpp
@@ -87,4 +89,8 @@ if(BUILD_TESTING)
     qt_add_executable(TranslationServiceTest tests/TranslationServiceTest.cpp)
     target_link_libraries(TranslationServiceTest PRIVATE showthis_core Qt6::Test)
     add_test(NAME TranslationServiceTest COMMAND TranslationServiceTest)
+
+    qt_add_executable(DictionaryLookupTest tests/DictionaryLookupTest.cpp)
+    target_link_libraries(DictionaryLookupTest PRIVATE showthis_core Qt6::Test)
+    add_test(NAME DictionaryLookupTest COMMAND DictionaryLookupTest)
 endif()

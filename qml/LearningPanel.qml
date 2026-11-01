@@ -230,14 +230,16 @@ Pane {
                     id: history_page
                     service: panel.service
                     onOpen_requested: function(entry) {
-                        panel.request_card({word: entry.word, language: entry.language, context: entry.context, from_history: true})
+                        panel.request_card({word: entry.word, language: entry.language, context: entry.context,
+                            dictionary_mode: entry.dictionary_mode, definition_language: entry.definition_language,
+                            dictionary_fallback: entry.dictionary_fallback, follow_forms: entry.follow_forms, from_history: true})
                     }
                     onSettings_requested: navigation.current_index = 3
                 }
                 NotebookSettings { service: panel.service }
             }
             Label {
-                text: panel.service.message || qsTr("Dictionary lookup sends only the word. Your notebook is stored locally.")
+                text: panel.service.message || qsTr("Lookup sends only the word to the selected dictionaries. Your notebook is stored locally.")
                 textFormat: Text.PlainText
                 font.pixelSize: panel.service.message.length > 0 ? 12 : 10
                 opacity: panel.service.message.length > 0 ? 0.8 : 0.55

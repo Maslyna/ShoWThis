@@ -61,7 +61,7 @@ NotebookContents LearningStore::load(int history_limit) {
         const auto separator = it.key().indexOf(':');
         if (separator <= 0)
             continue;
-        contents.history.append(QVariantMap{{"key", it.key()}, {"word", it.key().mid(separator + 1)},
+        contents.history.append(QVariantMap{{"key", it.key()}, {"word", it.value().toObject().value("word").toString(it.key().mid(separator + 1).section('|', 0, 0))},
             {"language", it.key().left(separator)}, {"context", ""}, {"last_lookup", ""}});
     }
     const auto old_count = contents.cache.size();

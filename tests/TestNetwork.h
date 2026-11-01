@@ -5,6 +5,7 @@
 #include <QPointer>
 #include <QTimer>
 #include <cstring>
+#include <functional>
 
 class TestReply : public QNetworkReply {
 public:
@@ -59,18 +60,26 @@ private:
 
 class TestNetwork : public QNetworkAccessManager {
 public:
+    struct Response {
+        QByteArray body;
+        int status = 200;
+    };
     QByteArray response;
     int status = 200;
     bool automatic = true;
     QList<QNetworkRequest> requests;
     QList<QByteArray> payloads;
     QPointer<TestReply> last_reply;
+    QList<QPointer<TestReply>> replies;
+    std::function<Response(const QNetworkRequest &)> responder;
 
 protected:
     QNetworkReply *createRequest(Operation, const QNetworkRequest &request, QIODevice *outgoing_data) override {
         requests.append(request);
         payloads.append(outgoing_data ? outgoing_data->readAll() : QByteArray{});
-        last_reply = new TestReply(request, response, status, automatic, this);
+        const auto result = responder ? responder(request) : Response{response, status};
+        last_reply = new TestReply(request, result.body, result.status, automatic, this);
+        replies.append(last_reply);
         return last_reply;
     }
 };

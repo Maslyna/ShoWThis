@@ -16,7 +16,8 @@ ColumnLayout {
     property bool lookup_attempted: false
     property alias word_prefix: card_form.word_prefix
     readonly property bool busy: service.dictionary_busy || service.translator.busy
-    readonly property var active_source: service.source.url ? service.source : saved_source
+    readonly property var active_source: current_sense.source && current_sense.source.url ? current_sense.source
+        : service.source.url ? service.source : saved_source
     readonly property var current_sense: selected_sense >= 0 && selected_sense < service.senses.length
         ? service.senses[selected_sense] : ({})
     readonly property bool can_save: !busy && word_input.text.trim().length > 0
@@ -34,6 +35,12 @@ ColumnLayout {
         const card = action.card || ({})
         if (card.language || action.language) service.source_language = card.language || action.language
         if (card.target_language) service.target_language = card.target_language
+        if (card.dictionary_mode || action.dictionary_mode)
+            service.dictionary_mode = card.dictionary_mode || action.dictionary_mode
+        if (card.definition_language || action.definition_language)
+            service.definition_language = card.definition_language || action.definition_language
+        if (action.dictionary_fallback !== undefined) service.dictionary_fallback = action.dictionary_fallback
+        if (action.follow_forms !== undefined) service.follow_forms = action.follow_forms
         service.clear()
         card_id = card.id || ""
         saved_source = card.source || ({})
@@ -74,11 +81,21 @@ ColumnLayout {
     }
     function select_sense(index: int) {
         selected_sense = index
+        if (current_sense.headword) word_input.text = current_sense.headword
         card_form.meaning = current_sense.definition || ""
         card_form.translation = native_translation(current_sense)
         card_form.word_prefix = current_sense.article || ""
         mark_dirty()
         if (!wide_layout) compact_page = 1
+    }
+    function search_headword(word: string) {
+        word_input.text = word
+        reset_lookup()
+        lookup()
+    }
+    function search_both() {
+        service.dictionary_mode = "both"
+        lookup()
     }
     function save_card() {
         if (!can_save) return
@@ -121,46 +138,54 @@ ColumnLayout {
                 id: search_surface
                 Layout.fillWidth: true
                 padding: 12
-                RowLayout {
+                ColumnLayout {
                     anchors.fill: parent
-                    spacing: 10
-                    TextField {
-                        id: word_input
-                        objectName: "lookup_word"
+                    spacing: 8
+                    RowLayout {
                         Layout.fillWidth: true
-                        Layout.minimumWidth: 0
-                        font.pixelSize: 26
-                        placeholderText: qsTr("Type a word…")
-                        background: null
-                        selectByMouse: true
-                        enabled: !editor.busy
-                        Accessible.name: qsTr("Word to look up")
-                        onAccepted: if (lookup_button.enabled) editor.lookup()
-                        onTextEdited: editor.reset_lookup()
-                    }
-                    NotebookLanguagePicker {
-                        objectName: "lookup_language"
-                        options: editor.service.language_options
-                        language_code: editor.service.source_language
-                        compact: !editor.wide_layout
-                        Layout.preferredWidth: editor.wide_layout ? 120 : 64
-                        enabled: !editor.busy
-                        Accessible.name: qsTr("Word language, separate from OCR")
-                        onLanguage_selected: function(code) {
-                            const previous = editor.service.source_language
-                            editor.service.source_language = code
-                            if (editor.service.source_language !== previous) editor.reset_lookup()
+                        spacing: 10
+                        TextField {
+                            id: word_input
+                            objectName: "lookup_word"
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            font.pixelSize: 26
+                            placeholderText: qsTr("Type a word…")
+                            background: null
+                            selectByMouse: true
+                            enabled: !editor.busy
+                            Accessible.name: qsTr("Word to look up")
+                            onAccepted: if (lookup_button.enabled) editor.lookup()
+                            onTextEdited: editor.reset_lookup()
+                        }
+                        NotebookLanguagePicker {
+                            objectName: "lookup_language"
+                            options: editor.service.language_options
+                            language_code: editor.service.source_language
+                            compact: !editor.wide_layout
+                            Layout.preferredWidth: editor.wide_layout ? 120 : 64
+                            enabled: !editor.busy
+                            Accessible.name: qsTr("Word language, separate from OCR")
+                            onLanguage_selected: function(code) {
+                                const previous = editor.service.source_language
+                                editor.service.source_language = code
+                                if (editor.service.source_language !== previous) editor.reset_lookup()
+                            }
+                        }
+                        NotebookButton {
+                            id: lookup_button
+                            objectName: "lookup_dictionary"
+                            text: editor.service.dictionary_busy ? qsTr("Looking…") : qsTr("Look up")
+                            primary: true
+                            enabled: !editor.busy && word_input.text.trim().length > 0
+                            onClicked: editor.lookup()
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("Send only this word to the selected dictionaries · Enter")
                         }
                     }
-                    NotebookButton {
-                        id: lookup_button
-                        objectName: "lookup_dictionary"
-                        text: editor.service.dictionary_busy ? qsTr("Looking…") : qsTr("Look up")
-                        primary: true
-                        enabled: !editor.busy && word_input.text.trim().length > 0
-                        onClicked: editor.lookup()
-                        ToolTip.visible: hovered
-                        ToolTip.text: qsTr("Send only this word to the dictionary · Enter")
+                    NotebookDictionaryOptions {
+                        service: editor.service
+                        onChanged: editor.reset_lookup()
                     }
                 }
             }
@@ -245,6 +270,8 @@ ColumnLayout {
                     Layout.preferredHeight: parent.card_height
                     onSense_selected: function(index) { editor.select_sense(index) }
                     onManual_meaning_requested: editor.compact_page = 1
+                    onHeadword_requested: function(word) { editor.search_headword(word) }
+                    onBoth_requested: editor.search_both()
                 }
                 NotebookCardEditor {
                     id: card_form

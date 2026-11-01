@@ -43,7 +43,7 @@ QString AnkiExporter::format_card(const QVariantMap &card) {
     const auto source = card.value("source").toMap();
     if (!source.isEmpty()) {
         const auto license = source.value("license").toMap();
-        back.append("<small>Wiktionary via FreeDictionaryAPI.com<br>"
+        back.append("<small>Wiktionary via " + anki_html(source.value("name", "FreeDictionaryAPI.com").toString()) + "<br>"
             + anki_html(source.value("url").toString()) + "<br>"
             + anki_html(license.value("name").toString()) + " "
             + anki_html(license.value("url").toString()) + "</small>");

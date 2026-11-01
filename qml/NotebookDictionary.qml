@@ -13,6 +13,8 @@ NotebookSurface {
     required property bool wide_layout
     signal sense_selected(int index)
     signal manual_meaning_requested()
+    signal headword_requested(string word)
+    signal both_requested()
     objectName: "dictionary_pane"
 
     ColumnLayout {
@@ -21,7 +23,15 @@ NotebookSurface {
         RowLayout {
             Layout.fillWidth: true
             Label { text: qsTr("Dictionary"); font.pixelSize: 17; font.bold: true; Layout.fillWidth: true }
-            Label { text: qsTr("English definitions"); font.pixelSize: 10; opacity: 0.5 }
+            NotebookButton {
+                objectName: "search_both_dictionaries"
+                text: qsTr("Search both")
+                quiet: true
+                font.pixelSize: 10
+                visible: dictionary.service.dictionary_mode !== "both"
+                enabled: !dictionary.service.dictionary_busy && dictionary.word.trim().length > 0
+                onClicked: dictionary.both_requested()
+            }
         }
         Item {
             Layout.fillWidth: true
@@ -66,10 +76,31 @@ NotebookSurface {
                     contentItem: ColumnLayout {
                         spacing: 6
                         Label {
+                            text: (row.modelData.provider === "kaikki" ? "Kaikki" : "FreeDictionaryAPI")
+                                + " · " + (row.modelData.definition_language || "en").toUpperCase()
+                                + " · " + (row.modelData.headword || dictionary.word)
+                            textFormat: Text.PlainText
+                            font.pixelSize: 10
+                            opacity: 0.65
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        Label {
                             text: (row.index + 1) + ".  " + row.modelData.definition
                             textFormat: Text.PlainText
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
+                        }
+                        Repeater {
+                            model: row.modelData.form_of || []
+                            NotebookButton {
+                                required property var modelData
+                                text: qsTr("Look up base form: %1").arg(modelData.word)
+                                quiet: true
+                                enabled: !dictionary.service.dictionary_busy
+                                Layout.fillWidth: true
+                                onClicked: dictionary.headword_requested(modelData.word)
+                            }
                         }
                         Label {
                             visible: (row.modelData.articles || []).length > 0
@@ -113,6 +144,12 @@ NotebookSurface {
                 font.pixelSize: 10
                 onClicked: Qt.openUrlExternally("https://freedictionaryapi.com/")
             }
+            NotebookButton {
+                text: "Kaikki ↗"
+                quiet: true
+                font.pixelSize: 10
+                onClicked: Qt.openUrlExternally("https://kaikki.org/")
+            }
             Item { Layout.fillWidth: true }
             NotebookButton {
                 visible: !!dictionary.active_source.url
@@ -121,7 +158,7 @@ NotebookSurface {
                 font.pixelSize: 10
                 onClicked: {
                     const url = dictionary.active_source.url || ""
-                    if (url.startsWith("https://en.wiktionary.org/")) Qt.openUrlExternally(url)
+                    if (/^https:\/\/[a-z-]+\.wiktionary\.org\//.test(url)) Qt.openUrlExternally(url)
                 }
             }
         }
