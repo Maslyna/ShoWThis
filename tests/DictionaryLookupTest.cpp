@@ -334,7 +334,7 @@ private slots:
                 || request.url().path().endsWith(word + ".jsonl") ? word : QString("Haus");
             if (request.url().path().endsWith(".json")) return {kaikki_index(current, "ru")};
             return {kaikki_entry(current, current == word ? QString::fromUtf8("форма Haus") : QString::fromUtf8("дом"),
-                "de", current == word ? QString("Haus") : QString{})};
+                "de", current == word ? QString("Haus") : QString{}, current == "Haus" ? house_forms() : QJsonArray{})};
         };
         showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
         service.set_source_language("de");
@@ -345,6 +345,10 @@ private slots:
         QVERIFY(service.save_word({}, "Haus", "der Häuser", QString::fromUtf8("дом"), "", "", 1));
         const auto card = service.vocabulary()[0].toMap();
         QCOMPARE(card.value("word").toString(), QString("Haus"));
+        QCOMPARE(card.value("base_form").toString(), QString("Haus"));
+        QCOMPARE(card.value("base_article").toString(), QString("das"));
+        QCOMPARE(card.value("article").toString(), QString("das"));
+        QCOMPARE(card.value("plural_forms").toStringList(), QStringList{QString::fromUtf8("Häuser")});
         QCOMPARE(card.value("dictionary_selection").toList(), service.dictionary_selection());
         QCOMPARE(card.value("follow_forms").toBool(), service.follow_forms());
         QCOMPARE(card.value("source").toMap().value("name").toString(), QString("Kaikki.org"));
@@ -357,6 +361,23 @@ private slots:
         QVERIFY(bytes.contains("Kaikki.org"));
         QVERIFY(bytes.contains("https://ru.wiktionary.org/wiki/Haus"));
         QVERIFY(!bytes.contains("via FreeDictionaryAPI.com"));
+        QVERIFY(bytes.contains("Base form: das Haus"));
+        QVERIFY(bytes.contains("Plural: H\xc3\xa4user"));
+        showthis::LearningService reopened(nullptr, directory.filePath("words.json"), &network);
+        QCOMPARE(reopened.vocabulary()[0].toMap().value("plural_forms").toStringList(), card.value("plural_forms").toStringList());
+        const auto id = card.value("id").toString();
+        QVERIFY(reopened.save_word(id, "Haus", "", "home", "", "note edit", -1));
+        QCOMPARE(reopened.vocabulary()[0].toMap().value("base_article").toString(), QString("das"));
+        const QVariantMap manual{{"base_form", "house"}, {"base_article", "the"}, {"plural_forms", QStringList{"houses"}}};
+        QVERIFY(reopened.save_word(id, "Haus", "", "home", "", "", -1, "", manual));
+        QCOMPARE(reopened.vocabulary()[0].toMap().value("base_form").toString(), QString("house"));
+        const QVariantMap invalid{{"plural_forms", QStringList{"bad\nform"}}};
+        QVERIFY(!reopened.save_word(id, "Haus", "", "home", "", "", -1, "", invalid));
+        QCOMPARE(reopened.vocabulary()[0].toMap().value("base_form").toString(), QString("house"));
+        const QVariantMap clear{{"base_form", ""}, {"base_article", ""}, {"plural_forms", QStringList{}}};
+        QVERIFY(reopened.save_word(id, "Haus", "", "home", "", "", -1, "", clear));
+        QVERIFY(reopened.vocabulary()[0].toMap().value("base_form").toString().isEmpty());
+        QVERIFY(reopened.vocabulary()[0].toMap().value("plural_forms").toStringList().isEmpty());
     }
 
     void multiple_editions_and_injected_provider_run_concurrently() {

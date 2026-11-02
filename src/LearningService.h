@@ -61,8 +61,10 @@ public:
     Q_INVOKABLE bool save_word(const QString &id, const QString &word, const QString &context,
                              const QString &meaning, const QString &translation,
                              const QString &notes, int sense_index,
-                             const QString &article = QStringLiteral("auto"));
+                              const QString &article = QStringLiteral("auto"),
+                              const QVariantMap &word_forms = {});
     Q_INVOKABLE QString format_word(const QString &word, const QString &article) const;
+    Q_INVOKABLE QString number_availability(const QVariantMap &forms) const;
     Q_INVOKABLE bool remove_word(const QString &id);
     Q_INVOKABLE bool clear_history();
     Q_INVOKABLE bool export_anki(const QUrl &destination, const QStringList &card_ids = {});

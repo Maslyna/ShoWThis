@@ -35,6 +35,11 @@ for tests; the caller retains ownership of an injected service.
   Kaikki and FreeDictionaryAPI are registered in `DictionaryProviders.cpp`;
   neither the scheduler nor QML needs provider-name branches.
 - `DictionaryData` normalizes the providers' formats and explicit form-of links.
+- `GrammarProfile` interprets normalized tags using bundled declarative profiles
+  in `data/grammar-profiles.json`. Rules depend on word language and part of
+  speech, never on the definition/translation language or dictionary provider.
+  Article suggestions retain their dictionary/profile/manual origin; number
+  availability distinguishes explicit absence from missing data.
 - `TranslationService` owns provider selection, configuration, request lifecycle,
   and translated text. It defaults to no translator. Translation fields and
   actions are hidden until the selected provider is configured.

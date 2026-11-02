@@ -110,6 +110,14 @@ NotebookSurface {
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
+                        Label {
+                            text: dictionary.service.number_availability(row.modelData)
+                            visible: text.length > 0
+                            font.pixelSize: 11
+                            opacity: 0.65
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
                     }
                     onClicked: dictionary.sense_selected(index)
                 }

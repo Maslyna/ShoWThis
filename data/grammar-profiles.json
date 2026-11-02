@@ -1,0 +1,24 @@
+{
+    "number": {
+        "parts_of_speech": ["noun"],
+        "singular_absent_tags": ["plural-only", "plural only", "no-singular", "no singular"],
+        "plural_absent_tags": ["singular-only", "singular only", "no-plural", "no plural", "uncountable"],
+        "plural_absence_blockers": ["countable", "plural-only", "plural only"],
+        "qualifier_tags": ["usually", "often", "sometimes", "chiefly", "mostly"],
+        "missing_forms": ["-", "—", "–"]
+    },
+    "languages": {
+        "en": {
+            "noun": {"lemma_is_singular": true}
+        },
+        "de": {
+            "noun": {
+                "lemma_is_singular": true,
+                "articles": {
+                    "singular": {"masculine": "der", "feminine": "die", "neuter": "das"},
+                    "plural": "die"
+                }
+            }
+        }
+    }
+}

@@ -372,13 +372,13 @@ void LearningServiceTest::dictionary_grammar_data() {
     QTest::addColumn<QString>("part_of_speech");
     QTest::addColumn<QStringList>("tags");
     QTest::addColumn<QStringList>("expected");
-    QTest::newRow("masculine") << QString("de") << QString("noun") << QStringList{"masculine"} << QStringList{};
+    QTest::newRow("masculine") << QString("de") << QString("noun") << QStringList{"masculine"} << QStringList{"der"};
     QTest::newRow("french-feminine") << QString("fr") << QString("noun") << QStringList{"feminine"} << QStringList{};
-    QTest::newRow("neuter") << QString("de") << QString("noun") << QStringList{"neuter"} << QStringList{};
-    QTest::newRow("plural-only") << QString("de") << QString("noun") << QStringList{"plural-only"} << QStringList{};
+    QTest::newRow("neuter") << QString("de") << QString("noun") << QStringList{"neuter"} << QStringList{"das"};
+    QTest::newRow("plural-only") << QString("de") << QString("noun") << QStringList{"plural-only"} << QStringList{"die"};
     QTest::newRow("spanish-multiple-genders") << QString("es") << QString("noun") << QStringList{"masculine", "feminine"} << QStringList{};
     QTest::newRow("unknown") << QString("de") << QString("noun") << QStringList{} << QStringList{};
-    QTest::newRow("plural-form-unknown-gender") << QString("de") << QString("noun") << QStringList{"plural"} << QStringList{};
+    QTest::newRow("plural-form-unknown-gender") << QString("de") << QString("noun") << QStringList{"plural"} << QStringList{"die"};
     QTest::newRow("verb") << QString("de") << QString("verb") << QStringList{"masculine"} << QStringList{};
     QTest::newRow("proper-name") << QString("de") << QString("name") << QStringList{"neuter"} << QStringList{};
     QTest::newRow("not-german") << QString("en") << QString("noun") << QStringList{"neuter"} << QStringList{};
@@ -425,7 +425,7 @@ void LearningServiceTest::article_persistence_and_legacy_cards() {
     service.set_source_language("de");
     service.lookup("Haus");
     QTRY_VERIFY(!service.dictionary_busy());
-    // Gender metadata remains, but no language-specific article is guessed.
+    // The German noun profile suggests the article; manual corrections win.
     QCOMPARE(service.senses()[1].toMap().value("tags").toStringList(), QStringList{"neuter"});
     QVERIFY(service.save_word({}, "Haus", "", "house", "", "", 1, "das"));
     auto card = service.vocabulary()[0].toMap();

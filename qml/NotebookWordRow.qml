@@ -57,6 +57,18 @@ ItemDelegate {
                 Layout.fillWidth: true
             }
             Label {
+                visible: !row.is_history && text.length > 0
+                text: [row.entry.base_form ? qsTr("Base: %1").arg(row.service.format_word(row.entry.base_form, row.entry.base_article || "")) : "",
+                    (row.entry.plural_forms || []).length > 0 ? qsTr("Plural: %1").arg(row.entry.plural_forms.join(" / ")) : "",
+                    row.service.number_availability(row.entry)]
+                    .filter(function(value) { return !!value }).join(" · ")
+                textFormat: Text.PlainText
+                font.pixelSize: 12
+                opacity: 0.7
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
+            Label {
                 visible: text.length > 0
                 text: row.entry.context || ""
                 textFormat: Text.PlainText

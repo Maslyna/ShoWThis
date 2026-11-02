@@ -29,6 +29,18 @@ QString AnkiExporter::format_card(const QVariantMap &card) {
     if (!context.isEmpty())
         front += "<br><br>" + anki_html(context);
     QStringList back;
+    const auto base = word_with_article(card.value("base_form").toString(), card.value("base_article").toString());
+    if (!card.value("base_form").toString().isEmpty())
+        back.append(anki_html(QObject::tr("Base form: %1").arg(base)));
+    const auto plurals = card.value("plural_forms").toStringList();
+    if (!plurals.isEmpty())
+        back.append(anki_html(QObject::tr("Plural: %1").arg(plurals.join(" / "))));
+    const auto singulars = card.value("singular_forms").toStringList();
+    if (!singulars.isEmpty() && singulars != QStringList{card.value("base_form").toString()})
+        back.append(anki_html(QObject::tr("Singular: %1").arg(singulars.join(" / "))));
+    const auto availability = number_availability_text(card);
+    if (!availability.isEmpty())
+        back.append(anki_html(availability));
     for (const auto &field : {QStringLiteral("translation"), QStringLiteral("meaning"), QStringLiteral("notes")}) {
         const auto text = card.value(field).toString();
         if (!text.isEmpty())

@@ -124,7 +124,7 @@ private slots:
             QCOMPARE(panel->property("compact_page").toInt(), 1);
         QCOMPARE(translation->property("text").toString(), translator_configured ? QString::fromUtf8("будинок") : QString{});
         QCOMPARE(translation->isVisible(), translator_configured);
-        QCOMPARE(panel->property("word_prefix").toString(), QString{});
+        QCOMPARE(panel->property("word_prefix").toString(), QString("das"));
         auto *article = find_item(surface.contentItem(), QStringLiteral("word_prefix"));
         auto *headword = find_item(surface.contentItem(), QStringLiteral("word_headword"));
         QVERIFY(article);
@@ -397,7 +397,7 @@ private slots:
                 || request.url().path().endsWith(observed + ".jsonl") ? observed : QString("Haus");
             if (request.url().path().endsWith(".json")) return {kaikki_index(word, "ru")};
             return {kaikki_entry(word, word == observed ? QString::fromUtf8("форма Haus") : QString::fromUtf8("дом"),
-                "de", word == observed ? QString("Haus") : QString{})};
+                "de", word == observed ? QString("Haus") : QString{}, word == "Haus" ? house_forms() : QJsonArray{})};
         };
         showthis::LearningService service(nullptr, directory.filePath("words.json"), &network, sample_dictionary_providers());
         service.set_source_language("de");
@@ -488,8 +488,36 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(resolved, "clicked"));
         QCOMPARE(word->property("text").toString(), QString("Haus"));
         QCOMPARE(meaning->property("text").toString(), QString::fromUtf8("дом"));
+        auto *base_form = find_item(surface.contentItem(), "word_base_form");
+        auto *base_prefix = find_item(surface.contentItem(), "word_base_prefix");
+        auto *plural_form = find_item(surface.contentItem(), "word_plural_form");
+        auto *prefix = find_item(surface.contentItem(), "word_prefix");
+        QVERIFY(base_form && base_prefix && plural_form && prefix);
+        QCOMPARE(base_form->property("text").toString(), QString("Haus"));
+        QCOMPARE(base_prefix->property("text").toString(), QString("das"));
+        QCOMPARE(prefix->property("text").toString(), QString("das"));
+        QCOMPARE(plural_form->property("text").toString(), QString::fromUtf8("Häuser"));
+        QTest::qWait(30);
+        const auto prefix_rect = base_prefix->mapRectToScene(QRectF(QPointF(), base_prefix->size()));
+        QVERIFY(prefix_rect.left() >= 0 && prefix_rect.right() <= size.width());
+        if (qEnvironmentVariableIsSet("SHOWTHIS_TEST_SCREENSHOTS")) {
+            const auto path = qEnvironmentVariable("SHOWTHIS_TEST_SCREENSHOTS")
+                + "/word-forms-" + QTest::currentDataTag() + ".png";
+            QVERIFY(surface.grabWindow().save(path));
+        }
         QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
         QCOMPARE(service.vocabulary()[0].toMap().value("source").toMap().value("name").toString(), QString("Kaikki.org"));
+        QCOMPARE(service.vocabulary()[0].toMap().value("base_article").toString(), QString("das"));
+        QCOMPARE(service.vocabulary()[0].toMap().value("plural_forms").toStringList(), QStringList{QString::fromUtf8("Häuser")});
+        QVERIFY(QMetaObject::invokeMethod(panel, "edit_card", Q_ARG(QVariant, service.vocabulary()[0])));
+        QCOMPARE(base_form->property("text").toString(), QString("Haus"));
+        QCOMPARE(plural_form->property("text").toString(), QString::fromUtf8("Häuser"));
+        plural_form->setProperty("text", QString::fromUtf8("Häuser / Häuserchen"));
+        QVERIFY(QMetaObject::invokeMethod(plural_form, "textEdited"));
+        QTRY_VERIFY(save->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+        QCOMPARE(service.vocabulary()[0].toMap().value("plural_forms").toStringList(),
+            (QStringList{QString::fromUtf8("Häuser"), QString::fromUtf8("Häuserchen")}));
         QVERIFY(QMetaObject::invokeMethod(choose, "clicked"));
         QVERIFY(toggle(free, true));
         auto *sample = find_item(surface.contentItem(), "dictionary_source_sample");
@@ -513,6 +541,80 @@ private slots:
         QTRY_VERIFY(!dialog->property("visible").toBool());
         QVERIFY(panel->isVisible());
         QCOMPARE(service.dictionary_selection().size(), 3); // Escape discards staged changes only.
+        QCOMPARE(warnings.size(), 0);
+    }
+
+    void grammar_profile_cards_data() {
+        QTest::addColumn<QString>("word");
+        QTest::addColumn<QString>("language");
+        QTest::addColumn<QStringList>("tags");
+        QTest::addColumn<QString>("prefix");
+        QTest::addColumn<QString>("status");
+        QTest::newRow("german-plural-only") << QString("Eltern") << QString("de") << QStringList{"plural", "plural only"} << QString("die") << QString("No singular");
+        QTest::newRow("german-gender") << QString("Haus") << QString("de") << QStringList{"neuter"} << QString("das") << QString("Plural not listed");
+        QTest::newRow("english-mass") << QString("information") << QString("en") << QStringList{"uncountable"} << QString{} << QString("No plural");
+        QTest::newRow("english-missing-plural") << QString("book") << QString("en") << QStringList{} << QString{} << QString("Plural not listed");
+    }
+
+    void grammar_profile_cards() {
+        QFETCH(QString, word);
+        QFETCH(QString, language);
+        QFETCH(QStringList, tags);
+        QFETCH(QString, prefix);
+        QFETCH(QString, status);
+        QTemporaryDir directory;
+        TestNetwork network;
+        const QJsonObject entry{{"language", QJsonObject{{"code", language}}}, {"partOfSpeech", "noun"},
+            {"forms", QJsonArray{}}, {"senses", QJsonArray{QJsonObject{{"definition", "meaning"}, {"tags", QJsonArray::fromStringList(tags)}}}}};
+        network.response = QJsonDocument(QJsonObject{{"word", word}, {"entries", QJsonArray{entry}}}).toJson();
+        const auto path = directory.filePath("words.json");
+        showthis::LearningService service(nullptr, path, &network);
+        service.set_source_language(language);
+        showthis::ShoWSurface surface(nullptr, &service);
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
+        surface.resize(640, 700);
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        auto *panel = find_item(surface.contentItem(), "learning_panel");
+        QVERIFY(panel);
+        QVERIFY(QMetaObject::invokeMethod(panel, "open_word", Q_ARG(QString, word), Q_ARG(QString, QString{})));
+        auto *lookup = find_item(surface.contentItem(), "lookup_dictionary");
+        QVERIFY(lookup);
+        QVERIFY(QMetaObject::invokeMethod(lookup, "clicked"));
+        QTRY_VERIFY(!service.dictionary_busy());
+        QTRY_VERIFY(find_item(surface.contentItem(), "dictionary_sense_0"));
+        auto *sense = find_item(surface.contentItem(), "dictionary_sense_0");
+        QVERIFY(QMetaObject::invokeMethod(sense, "clicked"));
+        auto *article = find_item(surface.contentItem(), "word_prefix");
+        auto *availability = find_item(surface.contentItem(), "word_number_availability");
+        auto *save = find_item(surface.contentItem(), "save_word");
+        QVERIFY(article && availability && save);
+        QCOMPARE(article->property("text").toString(), prefix);
+        QCOMPARE(availability->property("text").toString(), status);
+        if (qEnvironmentVariableIsSet("SHOWTHIS_TEST_SCREENSHOTS")) {
+            QTest::qWait(30);
+            const auto screenshot = qEnvironmentVariable("SHOWTHIS_TEST_SCREENSHOTS")
+                + "/grammar-card-" + QTest::currentDataTag() + ".png";
+            QVERIFY(surface.grabWindow().save(screenshot));
+        }
+        QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+        QCOMPARE(service.vocabulary().size(), 1);
+        const auto card = service.vocabulary()[0].toMap();
+        QCOMPARE(service.number_availability(card), status);
+        showthis::LearningService reopened(nullptr, path, &network);
+        QCOMPARE(reopened.number_availability(reopened.vocabulary()[0].toMap()), status);
+        QVERIFY(QMetaObject::invokeMethod(panel, "edit_card", Q_ARG(QVariant, QVariant(card))));
+        QCOMPARE(availability->property("text").toString(), status);
+        if (!prefix.isEmpty()) {
+            QCOMPARE(card.value("article_origin").toString(), QString("profile"));
+            article->setProperty("text", "manual");
+            QVERIFY(QMetaObject::invokeMethod(article, "textEdited"));
+            QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+            QCOMPARE(service.vocabulary()[0].toMap().value("article_origin").toString(), QString("manual"));
+        }
+        QVERIFY(QMetaObject::invokeMethod(panel, "open_word", Q_ARG(QString, QString("new")), Q_ARG(QString, QString{})));
+        QCOMPARE(availability->property("text").toString(), QString{});
         QCOMPARE(warnings.size(), 0);
     }
 

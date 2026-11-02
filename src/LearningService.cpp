@@ -4,6 +4,7 @@
 
 #include <QDateTime>
 #include <QJsonDocument>
+#include <QRegularExpression>
 #include <QUuid>
 #include <QSet>
 #include <QLocale>
@@ -13,8 +14,7 @@ namespace showthis {
 namespace {
 
 QString single_article(const QVariantMap &sense) {
-    // Preserve explicit dictionary metadata, but never infer an article from
-    // gender using language-specific rules.
+    // Dictionary normalization has already applied the word-language profile.
     return sense.value("article").toString();
 }
 
@@ -242,7 +242,8 @@ bool LearningService::write_store(const QVariantList &cards, const QJsonObject &
 
 bool LearningService::save_word(const QString &id, const QString &word, const QString &context,
                                const QString &meaning, const QString &translation,
-                               const QString &notes, int sense_index, const QString &article) {
+                                const QString &notes, int sense_index, const QString &article,
+                                const QVariantMap &word_forms) {
     if (article.trimmed().size() > 80 || article.contains('\n') || article.contains('\r') || article.contains('\t')) {
         set_message(tr("Keep the optional word prefix to one line, at most 80 characters."));
         return false;
@@ -287,6 +288,66 @@ bool LearningService::save_word(const QString &id, const QString &word, const QS
         : unchanged && old.contains("article") && sense_index < 0 ? old.value("article").toString()
         : single_article(card.value("sense").toMap());
     card.insert("article", word_prefix);
+    const auto sense = card.value("sense").toMap();
+    const auto form_value = [&](const QString &key) {
+        return word_forms.contains(key) ? word_forms.value(key)
+            : unchanged && sense_index < 0 && old.contains(key) ? old.value(key) : sense.value(key);
+    };
+    for (const auto &key : {"base_form", "base_article", "singular_forms", "plural_forms"}) {
+        const auto data = form_value(key);
+        if (QString(key) == "plural_forms" || QString(key) == "singular_forms") {
+            QStringList plurals;
+            for (const auto &plural : data.toStringList()) {
+                const auto text = plural.trimmed();
+                if (text.size() > 200 || text.contains(QRegularExpression("[\\r\\n\\t]"))) {
+                    set_message(tr("Keep each number form to one line, at most 200 characters."));
+                    return false;
+                }
+                if (!text.isEmpty() && !plurals.contains(text))
+                    plurals.append(text);
+            }
+            if (plurals.size() > 20) {
+                set_message(tr("Keep at most 20 alternatives per number form."));
+                return false;
+            }
+            card.insert(key, plurals);
+        } else {
+            const auto text = data.toString().trimmed();
+            const int limit = QString(key) == "base_article" ? 80 : 200;
+            if (text.size() > limit || text.contains(QRegularExpression("[\\r\\n\\t]"))) {
+                set_message(tr("Keep the base form and its prefix to one short line each."));
+                return false;
+            }
+            card.insert(key, text);
+        }
+    }
+    const bool number_relevant = form_value("number_relevant").toBool();
+    card.insert("number_relevant", number_relevant);
+    card.insert("grammar_profile", form_value("grammar_profile"));
+    for (const auto &number : {QStringLiteral("singular"), QStringLiteral("plural")}) {
+        auto status = form_value(number + "_status").toString();
+        if (status.isEmpty())
+            status = "unknown";
+        if (status != "unknown" && status != "available" && status != "unavailable" && status != "not_applicable") {
+            set_message(tr("Invalid number-form status."));
+            return false;
+        }
+        const bool has_forms = !card.value(number + "_forms").toStringList().isEmpty();
+        card.insert(number + "_status", !number_relevant ? "not_applicable" : has_forms ? "available"
+            : status == "available" || status == "not_applicable" ? "unknown" : status);
+    }
+    for (const auto &field : {QStringLiteral("article"), QStringLiteral("base_article")}) {
+        const auto origin_key = field + "_origin";
+        auto origin = form_value(origin_key).toString();
+        if ((field == "article" && article != "auto" && !word_forms.contains(origin_key))
+            || (field == "base_article" && word_forms.contains(field) && !word_forms.contains(origin_key)))
+            origin = "manual";
+        if (origin != "" && origin != "dictionary" && origin != "profile" && origin != "manual") {
+            set_message(tr("Invalid article origin."));
+            return false;
+        }
+        card.insert(origin_key, card.value(field).toString().isEmpty() ? QString{} : origin);
+    }
     if (existing >= 0)
         cards[existing] = card;
     else
@@ -322,6 +383,10 @@ bool LearningService::export_anki(const QUrl &destination, const QStringList &ca
 
 QString LearningService::format_word(const QString &word, const QString &article) const {
     return word_with_article(word, article);
+}
+
+QString LearningService::number_availability(const QVariantMap &forms) const {
+    return number_availability_text(forms);
 }
 
 }  // namespace showthis

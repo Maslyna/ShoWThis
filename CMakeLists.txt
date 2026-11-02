@@ -15,11 +15,14 @@ qt_standard_project_setup()
 
 # Share the production implementation with tests rather than maintaining
 # independent copies of each executable's source and dependency lists.
+qt_add_resources(SHOWTHIS_GRAMMAR_RESOURCES data/grammar.qrc)
 qt_add_library(showthis_core STATIC
     src/AppSettings.h src/AppSettings.cpp
     src/LearningService.h src/LearningService.cpp
     src/LearningStore.h src/LearningStore.cpp
     src/NotebookData.h src/NotebookData.cpp
+    src/GrammarProfile.h src/GrammarProfile.cpp
+    ${SHOWTHIS_GRAMMAR_RESOURCES}
     src/DictionaryData.h src/DictionaryData.cpp
     src/DictionaryLookup.h src/DictionaryLookup.cpp
     src/DictionaryProvider.h src/DictionaryProviders.cpp

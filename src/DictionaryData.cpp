@@ -159,9 +159,14 @@ QJsonObject kaikki_dictionary_document(const QByteArray &jsonl, const QString &w
             sense.insert("translations", translations);
             senses.append(sense);
         }
-        entries.append(QJsonObject{{"language", QJsonObject{{"code", language}}},
+        auto entry = QJsonObject{{"language", QJsonObject{{"code", language}}},
             {"headword", headword}, {"provider", "kaikki"}, {"definition_language", edition}, {"source", source},
-            {"partOfSpeech", raw.value("pos")}, {"pronunciations", pronunciations}, {"forms", forms}, {"senses", senses}});
+            {"partOfSpeech", raw.value("pos")}, {"pronunciations", pronunciations}, {"forms", forms}, {"senses", senses}};
+        for (const auto &key : {"article", "articles", "prefix"}) {
+            if (raw.contains(key))
+                entry.insert(key, raw.value(key));
+        }
+        entries.append(entry);
     }
     if (records == 0)
         error = QObject::tr("Kaikki returned empty JSONL data.");

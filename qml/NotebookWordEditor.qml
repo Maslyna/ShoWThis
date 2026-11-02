@@ -62,6 +62,7 @@ ColumnLayout {
         saved_source = ({})
         lookup_attempted = false
         card_form.word_prefix = ""
+        card_form.load_forms({})
         card_form.meaning = ""
         card_form.translation = ""
         mark_dirty()
@@ -83,6 +84,7 @@ ColumnLayout {
         card_form.meaning = current_sense.definition || ""
         card_form.translation = native_translation(current_sense)
         card_form.word_prefix = current_sense.article || ""
+        card_form.load_forms(current_sense)
         mark_dirty()
         if (!wide_layout) compact_page = 1
     }
@@ -95,7 +97,7 @@ ColumnLayout {
         if (!can_save) return
         if (service.save_word(card_id, word_input.text, context_input.text,
                 card_form.meaning, service.translator.configured ? card_form.translation : "",
-                card_form.notes, selected_sense, card_form.word_prefix)) {
+                card_form.notes, selected_sense, card_form.word_prefix, card_form.word_forms())) {
             if (card_id.length === 0) card_id = service.vocabulary[0].id
             dirty = false
         }

@@ -63,10 +63,17 @@ inline QByteArray kaikki_index(const QString &word, const QString &edition) {
 }
 
 inline QByteArray kaikki_entry(const QString &word, const QString &gloss, const QString &language = "de",
-    const QString &base = {}) {
+    const QString &base = {}, const QJsonArray &forms = {}) {
     QJsonObject sense{{"glosses", QJsonArray{gloss}}, {"tags", QJsonArray{"neuter"}}};
     if (!base.isEmpty())
         sense.insert("form_of", QJsonArray{QJsonObject{{"word", base}}});
-    return QJsonDocument(QJsonObject{{"word", word}, {"lang_code", language}, {"pos", "noun"},
+    return QJsonDocument(QJsonObject{{"word", word}, {"lang_code", language}, {"pos", "noun"}, {"forms", forms},
         {"senses", QJsonArray{sense}}}).toJson(QJsonDocument::Compact) + '\n';
+}
+
+inline QJsonArray house_forms() {
+    return {QJsonObject{{"form", "Haus"}, {"article", "das"}, {"tags", QJsonArray{"nominative", "singular"}}},
+        QJsonObject{{"form", "Häuser"}, {"article", "die"}, {"tags", QJsonArray{"nominative", "plural"}}},
+        QJsonObject{{"form", "Hauses"}, {"article", "des"}, {"tags", QJsonArray{"genitive", "singular"}}},
+        QJsonObject{{"form", "Häusern"}, {"article", "den"}, {"tags", QJsonArray{"dative", "plural"}}}};
 }

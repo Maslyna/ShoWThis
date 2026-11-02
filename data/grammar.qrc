@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/grammar">
+        <file alias="profiles.json">grammar-profiles.json</file>
+    </qresource>
+</RCC>
