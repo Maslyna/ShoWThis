@@ -89,6 +89,61 @@ private slots:
         QVERIFY(finished[0][2].toBool());
     }
 
+    void network_failure_after_headers_uses_local_pack_data() {
+        QTest::addColumn<int>("status");
+        QTest::addColumn<int>("network_error");
+        QTest::addColumn<QByteArray>("body");
+        QTest::addColumn<bool>("offline_expected");
+        QTest::newRow("timeout-after-headers") << 200 << int(QNetworkReply::TimeoutError) << QByteArray("partial") << true;
+        QTest::newRow("disconnect-after-headers") << 200 << int(QNetworkReply::RemoteHostClosedError) << QByteArray("partial") << true;
+        QTest::newRow("server-error") << 503 << int(QNetworkReply::NoError) << QByteArray{} << true;
+        QTest::newRow("not-found") << 404 << int(QNetworkReply::NoError) << QByteArray{} << false;
+        QTest::newRow("invalid-json") << 200 << int(QNetworkReply::NoError) << QByteArray("invalid") << false;
+        QTest::newRow("cancelled") << 200 << int(QNetworkReply::OperationCanceledError) << QByteArray{} << false;
+        QTest::newRow("cancelled-before-headers") << 0 << int(QNetworkReply::OperationCanceledError) << QByteArray{} << false;
+    }
+
+    void network_failure_after_headers_uses_local_pack() {
+        QFETCH(int, status);
+        QFETCH(int, network_error);
+        QFETCH(QByteArray, body);
+        QFETCH(bool, offline_expected);
+        QTemporaryDir directory;
+        TestNetwork network;
+        serve_download(network);
+        showthis::KaikkiOfflineStore store(&network, directory.path());
+        QVERIFY(install(store));
+        network.requests.clear();
+        network.responder = [=](const QNetworkRequest &) -> TestNetwork::Response {
+            return {body, status, QNetworkReply::NetworkError(network_error)};
+        };
+        showthis::DictionaryLookup lookup(&network, nullptr, showthis::default_dictionary_providers(&store));
+        QSignalSpy finished(&lookup, &showthis::DictionaryLookup::finished);
+        lookup.lookup("Haus", "de", {{{"kaikki", "ru"}}});
+        QTRY_COMPARE(finished.size(), 1);
+        const auto senses = showthis::dictionary_senses(finished[0][0].value<QJsonObject>(), "de");
+        QCOMPARE(senses.size(), offline_expected ? 1 : 0);
+        if (offline_expected)
+            QVERIFY(senses[0].toMap().value("source").toMap().value("offline").toBool());
+        QCOMPARE(network.requests.size(), 1);
+    }
+
+    void regional_word_language_uses_local_base_pack() {
+        QTemporaryDir directory;
+        TestNetwork network;
+        serve_download(network);
+        showthis::KaikkiOfflineStore store(&network, directory.path());
+        QVERIFY(install(store, "ru", "de-DE"));
+        QCOMPARE(store.packs()[0].toMap().value("word_language").toString(), QString("de"));
+        QVERIFY(QFileInfo::exists(directory.filePath("de--ru.sqlite")));
+        const auto job = store.lookup("ru", "de-AT", "Haus");
+        QVERIFY(job);
+        const auto response = (*job)();
+        QVERIFY(response.error.isEmpty());
+        QCOMPARE(showthis::dictionary_senses(response.document, "de-DE").size(), 1);
+        QVERIFY(store.remove("ru", "de-CH"));
+    }
+
     void local_only_never_contacts_network_even_when_missing() {
         QTemporaryDir directory;
         TestNetwork network;

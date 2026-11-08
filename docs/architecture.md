@@ -52,11 +52,16 @@ for tests; the caller retains ownership of an injected service.
   Article suggestions retain their dictionary/profile/manual origin; number
   availability distinguishes explicit absence from missing data.
 - `TranslationService` owns provider selection, configuration, request lifecycle,
-  and translated text. It defaults to no translator. Translation fields and
-  actions are hidden until the selected provider is configured.
+  and translated text. It defaults to no translator. Only the online Translate
+  action is hidden until the selected provider is configured; personal and
+  dictionary-supplied translations remain editable without a provider.
 - `LearningStore` owns JSON validation, legacy migrations, history trimming,
   owner-only permissions, and atomic writes. Service state is committed only
-  after a successful save.
+  after a successful save. Cards require unique non-empty IDs and non-empty
+  words; known optional fields are type-checked before migration or writing.
+  A malformed card makes the notebook read-only rather than silently repairing
+  or dropping data. Missing optional legacy fields and unknown metadata remain
+  supported, including the null grammar profile written by older manual cards.
 - `NotebookData` provides dictionary parsing, language-code normalization, and
   the shared article/prefix formatter used by the UI and exports.
 - `AnkiExporter` formats cards and validates/writes exports without overwriting
@@ -71,9 +76,9 @@ not create analysis metadata. Removing a card still removes the complete card.
 
 DeepL is an optional implementation of `TranslationProvider`, not part of the
 dictionary workflow. Select it in **Settings → Translation** and apply an API
-key to enable translation. Credentials are session-only; provider selection and
-non-secret options are saved under `translation/`. There is no migration from
-the former DeepL-specific settings or environment variable.
+key to enable online translation. Credentials are session-only; provider
+selection and non-secret options are saved under `translation/`. There is no
+migration from the former DeepL-specific settings or environment variable.
 
 To add a translator:
 
@@ -90,16 +95,26 @@ To add a translator:
 
 Changing a provider, its settings, credentials, word language, or target language
 cancels an outstanding translation and clears its result. Configuring a provider
-never sends text: only the explicit Translate action does. Disabling translation
-also clears the draft's translation field; saving without a translator uses only
-the visible meaning/notes fields. No compatibility layer for saved translations
-is provided.
+never sends text: only the explicit Translate action does. Provider configuration
+changes do not clear the word card's translation: it is user data, independent of
+the provider and its session-only credentials. Existing translations survive
+restarts and note-only edits without configuring a translator. Selecting another
+dictionary sense cancels any pending translation before replacing the draft's
+meaning and dictionary-supplied translation.
 
 ## Build and tests
 
-`showthis_core` and `showthis_ui` are shared internal libraries used by the app
-and tests. QML resources are initialized explicitly when linked from the static
-UI library.
+`showthis_core`, `showthis_ui`, and `showthis_ocr` are shared internal libraries
+used by the app and tests. QML resources are initialized explicitly when linked
+from the static UI library.
+
+OCR language discovery initializes only Tesseract's data path, not an English
+recognition model. Selected models are loaded in the OCR worker on demand;
+missing or unreadable models are reported as recoverable scan errors and do not
+prevent opening the notebook. Pixel conversion explicitly packs Leptonica RGB
+values rather than depending on the host's byte order. `OcrEngineTest` checks
+pixel channels, discovery without English, and missing models; an additional
+real-model smoke test runs when non-English tessdata is installed.
 
 ```sh
 cmake -S . -B build -DBUILD_TESTING=ON

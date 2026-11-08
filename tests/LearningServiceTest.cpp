@@ -9,6 +9,7 @@
 #include "LearningService.h"
 #include "LearningServiceTest.h"
 #include "TestNetwork.h"
+#include "DictionaryFixtures.h"
 
 static QByteArray dictionary_response() {
     QFile file(QFINDTESTDATA("fixtures/dictionary-de-Haus.json"));
@@ -69,6 +70,58 @@ static QByteArray dictionary_response() {
         showthis::LearningService reopened(nullptr, path);
         QVERIFY(reopened.vocabulary().isEmpty());
     }
+
+void LearningServiceTest::lookup_without_selection_preserves_saved_attribution() {
+    QTemporaryDir directory;
+    const auto path = directory.filePath("words.json");
+    TestNetwork network;
+    network.responder = [](const QNetworkRequest &request) -> TestNetwork::Response {
+        if (request.url().host() == "freedictionaryapi.com")
+            return {free_entry("Haus", "house")};
+        if (request.url().path().endsWith(".json"))
+            return {kaikki_index("Haus", "ru")};
+        return {kaikki_entry("Haus", "new definition")};
+    };
+    showthis::LearningService service(nullptr, path, &network);
+    service.set_source_language("de");
+    service.lookup("Haus");
+    QTRY_COMPARE(service.senses().size(), 1);
+    QVERIFY(service.save_word({}, "Haus", "", "house", "", "", 0));
+    const auto original = service.vocabulary()[0].toMap();
+    const auto id = original.value("id").toString();
+    QCOMPARE(original.value("source").toMap().value("provider").toString(), QString("freedictionary"));
+
+    QVERIFY(service.configure_dictionaries({dictionary_selection("kaikki", {"ru"})}, true));
+    service.lookup("Haus");
+    QTRY_VERIFY(!service.dictionary_busy());
+    QCOMPARE(service.senses().size(), 1);
+    QCOMPARE(service.source().value("provider").toString(), QString("kaikki"));
+    QVERIFY(service.save_word(id, "Haus", "", "house", "", "note-only edit", -1));
+    const auto edited = service.vocabulary()[0].toMap();
+    QCOMPARE(edited.value("source"), original.value("source"));
+    QCOMPARE(edited.value("sense"), original.value("sense"));
+    showthis::LearningService reopened(nullptr, path, &network);
+    QCOMPARE(reopened.vocabulary()[0].toMap().value("source"), original.value("source"));
+    QCOMPARE(QJsonObject::fromVariantMap(reopened.vocabulary()[0].toMap().value("sense").toMap()),
+        QJsonObject::fromVariantMap(original.value("sense").toMap()));
+
+    const auto export_path = directory.filePath("anki.txt");
+    QVERIFY(service.export_anki(QUrl::fromLocalFile(export_path)));
+    QFile exported(export_path);
+    QVERIFY(exported.open(QIODevice::ReadOnly));
+    const auto bytes = exported.readAll();
+    QVERIFY(bytes.contains("FreeDictionaryAPI.com"));
+    QVERIFY(!bytes.contains("Kaikki.org"));
+
+    // Only explicitly choosing a new sense replaces both attribution and sense.
+    QVERIFY(service.save_word(id, "Haus", "", "new definition", "", "", 0));
+    const auto replaced = service.vocabulary()[0].toMap();
+    QCOMPARE(replaced.value("source"), service.senses()[0].toMap().value("source"));
+    QCOMPARE(replaced.value("sense"), QVariant(service.senses()[0].toMap()));
+    QVERIFY(service.save_word({}, "Haus", "", "my own meaning", "", "", -1));
+    QVERIFY(service.vocabulary()[0].toMap().value("source").toMap().isEmpty());
+    QVERIFY(service.vocabulary()[0].toMap().value("sense").toMap().isEmpty());
+}
 
     void LearningServiceTest::contextual_translation() {
         QTemporaryDir directory;
@@ -501,6 +554,15 @@ void LearningServiceTest::flexible_languages() {
     showthis::LearningService reopened(nullptr, directory.filePath("words.json"));
     QCOMPARE(reopened.source_language(), QString("ja"));
     QCOMPARE(reopened.target_language(), QString("pt-br"));
+    service.set_source_language("fr-CA");
+    QCOMPARE(service.source_language(), QString("fr"));
+    service.set_target_language("en-US");
+    QCOMPARE(service.target_language(), QString("en-us"));
+    QSettings{}.setValue("learning/source_language", "de-DE");
+    showthis::LearningService regional(nullptr, directory.filePath("regional.json"));
+    QCOMPARE(regional.source_language(), QString("de"));
+    QCOMPARE(regional.target_language(), QString("en-us"));
+    QVERIFY(network.requests.isEmpty());
 }
 
 void LearningServiceTest::retired_metadata_is_preserved() {

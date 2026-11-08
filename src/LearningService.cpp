@@ -42,7 +42,7 @@ LearningService::LearningService(QObject *parent, const QString &file_name,
             if (cacheable && !m_senses.isEmpty())
                 remember_lookup(m_lookup_key, m_lookup_context, data);
         });
-    m_source_language = normalized_language_code(m_settings.value("learning/source_language", "en").toString());
+    m_source_language = dictionary_language_code(m_settings.value("learning/source_language", "en").toString());
     if (m_source_language.isEmpty())
         m_source_language = "en";
     m_target_language = normalized_language_code(m_settings.value("learning/target_language",
@@ -123,7 +123,7 @@ bool LearningService::configure_dictionaries(const QVariantList &selection, bool
 }
 
 void LearningService::set_source_language(const QString &language) {
-    const auto code = normalized_language_code(language);
+    const auto code = dictionary_language_code(language);
     if (code.isEmpty()) {
         set_message(tr("Choose a language or enter a language code, for example fr, es, or ja."));
         return;
@@ -283,10 +283,13 @@ bool LearningService::save_word(const QString &id, const QString &word, const QS
     for (auto it = fields.constBegin(); it != fields.constEnd(); ++it)
         card.insert(it.key(), it.value());
     const auto selected_sense = sense_index >= 0 && sense_index < m_senses.size() ? m_senses[sense_index].toMap() : QVariantMap{};
-    const bool matching = !m_source.isEmpty() && (word.trimmed() == m_lookup_word
-        || selected_sense.value("headword").toString() == word.trimmed());
+    // Looking up an existing word does not select a replacement meaning.
+    // Keep its saved sense and attribution together until a sense is chosen.
+    const bool matching = !selected_sense.isEmpty() && !m_source.isEmpty()
+        && (word.trimmed() == m_lookup_word
+            || selected_sense.value("headword").toString() == word.trimmed());
     const bool unchanged = old.value("word").toString() == word.trimmed()
-        && old.value("language").toString() == m_source_language;
+        && dictionary_language_code(old.value("language").toString()) == m_source_language;
     card.insert("source", matching ? selected_sense.value("source", m_source).toMap()
         : unchanged ? old.value("source").toMap() : QVariantMap{});
     card.insert("sense", matching && sense_index >= 0 && sense_index < m_senses.size()
@@ -330,7 +333,7 @@ bool LearningService::save_word(const QString &id, const QString &word, const QS
     }
     const bool number_relevant = form_value("number_relevant").toBool();
     card.insert("number_relevant", number_relevant);
-    card.insert("grammar_profile", form_value("grammar_profile"));
+    card.insert("grammar_profile", form_value("grammar_profile").toString());
     for (const auto &number : {QStringLiteral("singular"), QStringLiteral("plural")}) {
         auto status = form_value(number + "_status").toString();
         if (status.isEmpty())

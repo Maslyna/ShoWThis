@@ -29,7 +29,7 @@ signals:
     void finished(const QJsonObject &data, const QString &message, bool cacheable);
 
 private:
-    using ResponseHandler = std::function<void(const QByteArray &, int, const QString &)>;
+    using ResponseHandler = std::function<void(const QByteArray &, int, const QString &, QNetworkReply::NetworkError)>;
     const DictionaryProvider *provider(const QString &id) const;
     void send(DictionaryRequest request, ResponseHandler handler);
     void fetch_word(const DictionaryTarget &target, const QString &word, int depth);
@@ -56,6 +56,7 @@ private:
     QList<DictionaryTarget> m_active;
     QHash<QString, QSet<QString>> m_visited;
     QHash<QString, QJsonArray> m_entries;
+    QList<QPair<QString, int>> m_form_targets;
     QStringList m_errors;
     QHash<QString, QStringList> m_missing;
     int m_pending_words = 0;

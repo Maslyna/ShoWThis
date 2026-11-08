@@ -36,6 +36,9 @@ private slots:
     void language_codes() {
         QCOMPARE(showthis::normalized_language_code(" FRA "), QString("fr"));
         QCOMPARE(showthis::normalized_language_code("pt_BR"), QString("pt-br"));
+        QCOMPARE(showthis::dictionary_language_code("pt_BR"), QString("pt"));
+        QCOMPARE(showthis::dictionary_language_code(" DEU-DE "), QString("de"));
+        QVERIFY(showthis::dictionary_language_code("../invalid").isEmpty());
         QVERIFY(showthis::normalized_language_code("../invalid").isEmpty());
     }
     void pure_anki_formatting() {
@@ -113,6 +116,50 @@ private slots:
         const auto isolated = showthis::dictionary_senses(QJsonObject{{"entries", entries}}, "de")[0].toMap();
         QCOMPARE(isolated.value("base_article").toString(), QString("das"));
         QCOMPARE(isolated.value("base_article_origin").toString(), QString("profile"));
+    }
+
+    void inflection_number_restrictions_survive_enrichment_data() {
+        QTest::addColumn<QString>("number");
+        QTest::addColumn<QStringList>("tags");
+        QTest::addColumn<bool>("explicit_missing_form");
+        QTest::addColumn<bool>("restricted");
+        QTest::newRow("no-plural") << QString("plural") << QStringList{"uncountable"} << false << true;
+        QTest::newRow("no-singular") << QString("singular") << QStringList{"plural-only"} << false << true;
+        QTest::newRow("missing-plural") << QString("plural") << QStringList{} << true << true;
+        QTest::newRow("missing-singular") << QString("singular") << QStringList{} << true << true;
+        QTest::newRow("qualified-restriction") << QString("plural") << QStringList{"uncountable", "usually"} << false << false;
+        QTest::newRow("unknown-is-enriched") << QString("singular") << QStringList{} << false << false;
+    }
+
+    void inflection_number_restrictions_survive_enrichment() {
+        QFETCH(QString, number);
+        QFETCH(QStringList, tags);
+        QFETCH(bool, explicit_missing_form);
+        QFETCH(bool, restricted);
+        tags.append("form-of");
+        QJsonObject inflection{{"headword", "variant"}, {"language", QJsonObject{{"code", "en"}}},
+            {"provider", "sample"}, {"definition_language", "en"}, {"partOfSpeech", "noun"},
+            {"senses", QJsonArray{QJsonObject{{"definition", "variant of lemma"},
+                {"tags", QJsonArray::fromStringList(tags)},
+                {"form_of", QJsonArray{QJsonObject{{"word", "lemma"}}}}}}}};
+        if (explicit_missing_form)
+            inflection.insert("forms", QJsonArray{QJsonObject{{"word", "—"}, {"tags", QJsonArray{number}}}});
+        const QJsonObject base{{"headword", "lemma"}, {"language", QJsonObject{{"code", "en"}}},
+            {"provider", "sample"}, {"definition_language", "en"}, {"partOfSpeech", "noun"},
+            {"forms", QJsonArray{
+                QJsonObject{{"word", "lemma"}, {"tags", QJsonArray{"singular"}}},
+                QJsonObject{{"word", "lemmas"}, {"tags", QJsonArray{"plural"}}}}},
+            {"senses", QJsonArray{QJsonObject{{"definition", "a countable sense"}}}}};
+        const auto senses = showthis::dictionary_senses(QJsonObject{{"entries", QJsonArray{inflection, base}}}, "en");
+        QCOMPARE(senses.size(), 2);
+        const auto sense = senses[0].toMap();
+        QCOMPARE(sense.value(number + "_status").toString(), restricted ? QString("unavailable") : QString("available"));
+        QCOMPARE(sense.value(number + "_forms").toStringList().isEmpty(), restricted);
+        const auto other = number == "plural" ? QString("singular") : QString("plural");
+        QCOMPARE(sense.value(other + "_status").toString(), QString("available"));
+        QVERIFY(!sense.value(other + "_forms").toStringList().isEmpty());
+        if (restricted)
+            QVERIFY(showthis::AnkiExporter::format_card(sense).contains(number == "plural" ? "No plural" : "No singular"));
     }
 
     void ambiguous_articles_and_missing_forms_are_not_guessed() {

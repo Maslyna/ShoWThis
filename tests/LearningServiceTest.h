@@ -10,6 +10,7 @@ private slots:
     void initTestCase();
     void init();
     void dictionary_cache_and_vocabulary();
+    void lookup_without_selection_preserves_saved_attribution();
     void contextual_translation();
     void failures_and_cancellation();
     void corrupt_store_is_preserved();

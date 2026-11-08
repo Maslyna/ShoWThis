@@ -72,7 +72,7 @@ QJsonObject free_dictionary_document(const QJsonObject &data, const QString &wor
     QJsonArray entries;
     for (const auto &value : data.value("entries").toArray()) {
         auto entry = value.toObject();
-        if (normalized_language_code(entry.value("language").toObject().value("code").toString()) != language)
+        if (dictionary_language_code(entry.value("language").toObject().value("code").toString()) != dictionary_language_code(language))
             continue;
         entry.insert("headword", data.value("word").toString(word));
         entry.insert("provider", "freedictionary");
@@ -99,7 +99,7 @@ QJsonObject kaikki_dictionary_document(const QByteArray &jsonl, const QString &w
             return {};
         }
         const auto raw = document.object();
-        if (normalized_language_code(raw.value("lang_code").toString()) != language)
+        if (dictionary_language_code(raw.value("lang_code").toString()) != dictionary_language_code(language))
             continue;
         const auto headword = raw.value("word").toString();
         if (headword.isEmpty() || headword.compare(word, Qt::CaseInsensitive) != 0)
@@ -159,7 +159,7 @@ QJsonObject kaikki_dictionary_document(const QByteArray &jsonl, const QString &w
             sense.insert("translations", translations);
             senses.append(sense);
         }
-        auto entry = QJsonObject{{"language", QJsonObject{{"code", language}}},
+        auto entry = QJsonObject{{"language", QJsonObject{{"code", dictionary_language_code(language)}}},
             {"headword", headword}, {"provider", "kaikki"}, {"definition_language", edition}, {"source", source},
             {"partOfSpeech", raw.value("pos")}, {"pronunciations", pronunciations}, {"forms", forms}, {"senses", senses}};
         for (const auto &key : {"article", "articles", "prefix"}) {

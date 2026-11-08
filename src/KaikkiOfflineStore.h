@@ -39,6 +39,7 @@ public:
     QString message() const { return m_message; }
     QString storage_path() const { return m_directory; }
     QString cache_token() const;
+    Q_INVOKABLE QString normalize_word_language(const QString &language) const;
     std::optional<Lookup> lookup(const QString &edition, const QString &word_language, const QString &word) const;
     Q_INVOKABLE void inspect(const QString &edition, const QString &word_language = {});
     Q_INVOKABLE void download(const QString &edition, const QString &word_language = {});

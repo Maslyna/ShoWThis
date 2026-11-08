@@ -8,6 +8,7 @@
 #include <QString>
 #include <QSystemTrayIcon>
 #include <QtLogging>
+#include <exception>
 
 #include "GlobalShortcutPortal.h"
 #include "AppSettings.h"
@@ -55,16 +56,24 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    showthis::ocr::OcrEngine ocr_engine{{"eng"}};
+    showthis::ocr::OcrEngine ocr_engine;
     showthis::KWinScreenCaptureBackend backend;
     showthis::GlobalShortcutPortal portal;
     showthis::ShoWSurface w;
 
     if (w.status() == QQuickView::Error)
         return 1;
-    QStringList languages = ocr_engine.available_languages();
+    QStringList languages;
+    try {
+        languages = ocr_engine.available_languages();
+    } catch (const std::exception &error) {
+        qWarning() << "OCR language discovery failed:" << error.what();
+        w.set_error(QObject::tr("Cannot find OCR languages. Install Tesseract language data or check TESSDATA_PREFIX."));
+    }
     w.set_languages(languages);
     w.set_language(settings.ocr_language(languages));
+    if (languages.isEmpty() && w.error().isEmpty())
+        w.set_error(QObject::tr("No OCR language data installed. Install a Tesseract language pack to enable screen recognition."));
 
     w.setFlags(Qt::FramelessWindowHint);
 

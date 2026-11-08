@@ -47,17 +47,20 @@ qt_add_library(showthis_ui STATIC
 )
 target_link_libraries(showthis_ui PUBLIC showthis_core Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Concurrent Qt6::Widgets)
 
+qt_add_library(showthis_ocr STATIC src/OcrEngine.h src/OcrEngine.cpp)
+target_include_directories(showthis_ocr PUBLIC src)
+target_link_libraries(showthis_ocr PUBLIC Qt6::Gui PkgConfig::TESSERACT PkgConfig::LEPTONICA)
+
 qt_add_executable(ShoWThis
     WIN32 MACOSX_BUNDLE
     src/main.cpp
     src/KWinScreenCaptureBackend.h src/KWinScreenCaptureBackend.cpp
     src/GlobalShortcutPortal.h src/GlobalShortcutPortal.cpp
     src/ShoWThisConstants.h
-    src/OcrEngine.h src/OcrEngine.cpp
 )
 target_link_libraries(ShoWThis PRIVATE
-    showthis_ui Qt6::Widgets Qt6::DBus Qt6::OpenGL
-    LayerShellQt::Interface PkgConfig::TESSERACT PkgConfig::LEPTONICA
+    showthis_ui showthis_ocr Qt6::Widgets Qt6::DBus Qt6::OpenGL
+    LayerShellQt::Interface
 )
 
 install(TARGETS ShoWThis
@@ -75,6 +78,10 @@ install(SCRIPT ${deploy_script})
 include(CTest)
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
+    qt_add_executable(OcrEngineTest tests/OcrEngineTest.cpp)
+    target_link_libraries(OcrEngineTest PRIVATE showthis_ocr Qt6::Test)
+    add_test(NAME OcrEngineTest COMMAND OcrEngineTest)
+
     qt_add_executable(OverlayTest tests/OverlayTest.cpp)
     target_link_libraries(OverlayTest PRIVATE showthis_ui Qt6::Test)
     add_test(NAME OverlayTest COMMAND OverlayTest)

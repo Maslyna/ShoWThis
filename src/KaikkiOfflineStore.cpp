@@ -148,7 +148,11 @@ QUrl KaikkiOfflineStore::download_url(const QString &edition) {
 }
 
 bool KaikkiOfflineStore::valid_word_language(const QString &language) const {
-    return language.isEmpty() || (!normalized_language_code(language).isEmpty() && normalized_language_code(language) == language);
+    return language.isEmpty() || !dictionary_language_code(language).isEmpty();
+}
+
+QString KaikkiOfflineStore::normalize_word_language(const QString &language) const {
+    return dictionary_language_code(language);
 }
 
 QString KaikkiOfflineStore::pack_path(const QString &edition, const QString &word_language) const {
@@ -206,14 +210,15 @@ void KaikkiOfflineStore::finish(const QString &message) {
     emit changed();
 }
 
-void KaikkiOfflineStore::inspect(const QString &edition, const QString &word_language) {
+void KaikkiOfflineStore::inspect(const QString &edition, const QString &requested_language) {
     if (busy())
         return;
-    if (!valid_edition(edition) || !valid_word_language(word_language)) {
+    if (!valid_edition(edition) || !valid_word_language(requested_language)) {
         m_offer.clear();
         finish(tr("Choose a definition language and a valid word-language code, such as en or de."));
         return;
     }
+    const auto word_language = dictionary_language_code(requested_language);
     m_offer.clear();
     m_busy = true;
     m_message = tr("Checking download size…");
@@ -242,8 +247,9 @@ void KaikkiOfflineStore::inspect(const QString &edition, const QString &word_lan
     });
 }
 
-void KaikkiOfflineStore::download(const QString &edition, const QString &word_language) {
-    if (busy() || !valid_edition(edition) || !valid_word_language(word_language)
+void KaikkiOfflineStore::download(const QString &edition, const QString &requested_language) {
+    const auto word_language = dictionary_language_code(requested_language);
+    if (busy() || !valid_edition(edition) || !valid_word_language(requested_language)
         || m_offer.value("edition").toString() != edition || m_offer.value("word_language").toString() != word_language)
         return;
     if (!QDir().mkpath(m_directory)) {
@@ -362,8 +368,9 @@ void KaikkiOfflineStore::cancel() {
     }
 }
 
-bool KaikkiOfflineStore::remove(const QString &edition, const QString &word_language) {
-    if (busy() || !valid_edition(edition) || !valid_word_language(word_language))
+bool KaikkiOfflineStore::remove(const QString &edition, const QString &requested_language) {
+    const auto word_language = dictionary_language_code(requested_language);
+    if (busy() || !valid_edition(edition) || !valid_word_language(requested_language))
         return false;
     const auto path = pack_path(edition, word_language);
     const auto metadata = pack_metadata(path);
@@ -450,7 +457,7 @@ KaikkiOfflineStore::ImportResult KaikkiOfflineStore::import_pack(const std::shar
                 return true;
             }
             if (!languages.contains(code))
-                languages.insert(code, normalized_language_code(code));
+                languages.insert(code, dictionary_language_code(code));
             if (languages.value(code).isEmpty() || (!job->word_language.isEmpty() && languages.value(code) != job->word_language))
                 return true;
             insert.text(1, languages.value(code));
@@ -539,7 +546,10 @@ KaikkiOfflineStore::ImportResult KaikkiOfflineStore::import_pack(const std::shar
     return {};
 }
 
-std::optional<KaikkiOfflineStore::Lookup> KaikkiOfflineStore::lookup(const QString &edition, const QString &language, const QString &word) const {
+std::optional<KaikkiOfflineStore::Lookup> KaikkiOfflineStore::lookup(const QString &edition, const QString &requested_language, const QString &word) const {
+    const auto language = dictionary_language_code(requested_language);
+    if (language.isEmpty())
+        return {};
     QString scope;
     bool installed = false;
     for (const auto &value : m_packs) {

@@ -11,6 +11,80 @@
 #include <QStandardPaths>
 
 namespace showthis {
+namespace {
+
+bool string_array(const QJsonValue &value) {
+    if (!value.isArray())
+        return false;
+    for (const auto &item : value.toArray()) {
+        if (!item.isString())
+            return false;
+    }
+    return true;
+}
+
+bool valid_card(const QJsonObject &card) {
+    if (!card.value("id").isString() || card.value("id").toString().trimmed().isEmpty()
+        || !card.value("word").isString() || card.value("word").toString().trimmed().isEmpty())
+        return false;
+    // Older cards may omit optional fields. Unknown fields are deliberately
+    // unrestricted and retained; known fields must have the types the UI uses.
+    for (const auto *key : {"language", "target_language", "context", "meaning", "translation", "notes",
+             "article", "base_form", "base_article", "article_origin", "base_article_origin",
+             "singular_status", "plural_status", "created", "updated"}) {
+        if (card.contains(key) && !card.value(key).isString())
+            return false;
+    }
+    // Earlier manual cards wrote a JSON null when no profile was available.
+    if (card.contains("grammar_profile") && !card.value("grammar_profile").isString()
+        && !card.value("grammar_profile").isNull())
+        return false;
+    for (const auto *key : {"singular_forms", "plural_forms"}) {
+        if (card.contains(key) && !string_array(card.value(key)))
+            return false;
+    }
+    for (const auto *key : {"number_relevant", "follow_forms"}) {
+        if (card.contains(key) && !card.value(key).isBool())
+            return false;
+    }
+    for (const auto *key : {"source", "sense"}) {
+        if (card.contains(key) && !card.value(key).isObject())
+            return false;
+    }
+    if (card.contains("dictionary_selection")) {
+        if (!card.value("dictionary_selection").isArray())
+            return false;
+        for (const auto &value : card.value("dictionary_selection").toArray()) {
+            const auto selection = value.toObject();
+            if (!value.isObject() || !selection.value("provider").isString()
+                || selection.value("provider").toString().isEmpty()
+                || !string_array(selection.value("languages"))
+                || (selection.contains("fallback") && !selection.value("fallback").isBool()))
+                return false;
+        }
+    }
+    return true;
+}
+
+bool valid_cards(const QJsonArray &cards, QString &error) {
+    QSet<QString> ids;
+    for (qsizetype i = 0; i < cards.size(); ++i) {
+        const auto card = cards[i].toObject();
+        if (!cards[i].isObject() || !valid_card(card)) {
+            error = QObject::tr("Card %1 has missing or invalid fields.").arg(i + 1);
+            return false;
+        }
+        const auto id = card.value("id").toString();
+        if (ids.contains(id)) {
+            error = QObject::tr("Card %1 has a duplicate ID.").arg(i + 1);
+            return false;
+        }
+        ids.insert(id);
+    }
+    return true;
+}
+
+}  // namespace
 
 LearningStore::LearningStore(const QString &file_name)
     : m_file_name(file_name.isEmpty()
@@ -32,6 +106,13 @@ NotebookContents LearningStore::load(int history_limit) {
         || (object.contains("dictionary_history") && !object.value("dictionary_history").isArray())) {
         m_readable = false;
         m_error = QObject::tr("Cannot read vocabulary file: %1. It will not be overwritten.").arg(m_file_name);
+        return contents;
+    }
+    QString card_error;
+    if (!valid_cards(object.value("cards").toArray(), card_error)) {
+        m_readable = false;
+        m_error = QObject::tr("Cannot read vocabulary file: %1. %2 It will not be overwritten.")
+            .arg(m_file_name, card_error);
         return contents;
     }
     // Keep unknown fields, including metadata from discontinued features.
@@ -87,9 +168,15 @@ void LearningStore::trim_history(QVariantList &history, QJsonObject &cache, int 
 bool LearningStore::save(const QVariantList &cards, const QJsonObject &cache, const QVariantList &history) {
     if (!m_readable)
         return false;
+    const auto card_array = QJsonArray::fromVariantList(cards);
+    QString card_error;
+    if (!valid_cards(card_array, card_error)) {
+        m_error = QObject::tr("Cannot save vocabulary: %1").arg(card_error);
+        return false;
+    }
     auto object = m_document;
     object.insert("version", 1);
-    object.insert("cards", QJsonArray::fromVariantList(cards));
+    object.insert("cards", card_array);
     object.insert("dictionary_cache", cache);
     object.insert("dictionary_history", QJsonArray::fromVariantList(history));
     const auto bytes = QJsonDocument(object).toJson();

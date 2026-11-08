@@ -39,7 +39,7 @@ public:
     Q_INVOKABLE void forget_credentials();
     void translate(const QString &word, const QString &context,
                    const QString &source_language, const QString &target_language);
-    void clear();
+    Q_INVOKABLE void clear();
 
 signals:
     void provider_changed();

@@ -165,6 +165,10 @@ QString normalized_language_code(QString code) {
     return code;
 }
 
+QString dictionary_language_code(const QString &code) {
+    return normalized_language_code(code).section('-', 0, 0);
+}
+
 QString word_with_article(const QString &word, const QString &article) {
     const auto prefix = article.trimmed();
     if (prefix.isEmpty())
@@ -193,6 +197,9 @@ QString number_availability_text(const QVariantMap &forms) {
 
 QVariantList dictionary_senses(const QJsonObject &data, const QString &language) {
     QVariantList result;
+    const auto word_language = dictionary_language_code(language);
+    if (word_language.isEmpty())
+        return result;
     for (const auto &value : data.value("entries").toArray()) {
         auto entry = value.toObject();
         if (!entry.contains("source"))
@@ -204,7 +211,7 @@ QVariantList dictionary_senses(const QJsonObject &data, const QString &language)
             entry.insert("provider", source.value("provider"));
         if (!entry.contains("definition_language"))
             entry.insert("definition_language", source.value("definition_language"));
-        if (normalized_language_code(entry.value("language").toObject().value("code").toString()) == language)
+        if (dictionary_language_code(entry.value("language").toObject().value("code").toString()) == word_language)
             append_senses(entry.value("senses").toArray(), entry, result, 0, entry.value("tags").toVariant().toStringList());
     }
     // Enrich an inflection with metadata from its explicitly linked headword.
@@ -218,6 +225,8 @@ QVariantList dictionary_senses(const QJsonObject &data, const QString &language)
             continue;
         auto plurals = item.value("plural_forms").toStringList();
         auto singulars = item.value("singular_forms").toStringList();
+        const bool no_singular = item.value("singular_status").toString() == "unavailable";
+        const bool no_plural = item.value("plural_status").toString() == "unavailable";
         QStringList articles;
         QStringList origins;
         QSet<QString> singular_states;
@@ -233,10 +242,16 @@ QVariantList dictionary_senses(const QJsonObject &data, const QString &language)
             append_unique(origins, candidate.value("base_article_origin").toString());
             singular_states.insert(candidate.value("singular_status").toString());
             plural_states.insert(candidate.value("plural_status").toString());
-            for (const auto &singular : candidate.value("singular_forms").toStringList())
-                append_unique(singulars, singular);
-            for (const auto &plural : candidate.value("plural_forms").toStringList())
-                append_unique(plurals, plural);
+            // A headword's other senses must not undo this sense's explicit
+            // restrictions. Unknown forms can still inherit dictionary data.
+            if (!no_singular) {
+                for (const auto &singular : candidate.value("singular_forms").toStringList())
+                    append_unique(singulars, singular);
+            }
+            if (!no_plural) {
+                for (const auto &plural : candidate.value("plural_forms").toStringList())
+                    append_unique(plurals, plural);
+            }
         }
         if (item.value("base_article").toString().isEmpty() && articles.size() == 1) {
             item.insert("base_article", articles.first());

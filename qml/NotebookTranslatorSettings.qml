@@ -18,7 +18,7 @@ NotebookSurface {
             }
         }
         Label {
-            text: qsTr("Dictionary lookup works on its own. Choose and configure a translator to enable the translation field in word cards.")
+            text: qsTr("Word-card translations can be written and edited without a translator. Choose and configure a translator to enable online translation.")
             opacity: 0.65
             wrapMode: Text.WordWrap
             Layout.fillWidth: true

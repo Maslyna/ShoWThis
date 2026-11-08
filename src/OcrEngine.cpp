@@ -8,7 +8,6 @@
 #include <QList>
 #include <QRect>
 #include <QString>
-#include <cstring>
 #include <stdexcept>
 #include <vector>
 
@@ -21,12 +20,10 @@ void PixDeleter::operator()(PIX *pix) const noexcept {
 }
 
 OcrEngine::OcrEngine(OcrEngineConfig config)
-    : m_config(std::move(config)), m_api(std::make_unique<tesseract::TessBaseAPI>()) {
-    const auto langs = m_config.langs.toStdString();
-
-    if (m_api->Init(nullptr, langs.c_str()) != 0) {
-        throw std::runtime_error("Could'nt initialize Tesseract for language: " + langs);
-    }
+    : m_config{{}, config.data_path}, m_api(std::make_unique<tesseract::TessBaseAPI>()) {
+    // Language discovery and notebook startup do not require a loaded model.
+    if (!config.langs.isEmpty())
+        set_languages(config.langs);
 }
 
 OcrEngine::~OcrEngine() {
@@ -46,16 +43,24 @@ PixPtr OcrEngine::to_pix(const QImage &img) {
         const uchar *line = rgba8888.constScanLine(y);
         auto *dst         = pixGetData(pix.get()) + y * pixGetWpl(pix.get());
 
-        // assuming that RGBA8888 is 32 bits long
-        std::memcpy(dst, line, rgba8888.width() * 4);
+        // Leptonica stores numeric 0xRRGGBB00 pixels, not RGBA byte arrays.
+        // Explicit packing is correct on both little- and big-endian hosts.
+        for (int x = 0; x < rgba8888.width(); ++x)
+            composeRGBPixel(line[4 * x], line[4 * x + 1], line[4 * x + 2], &dst[x]);
     }
 
     return pix;
 }
 
 QStringList OcrEngine::available_languages() const {
+    tesseract::TessBaseAPI catalogue;
+    const auto path = m_config.data_path.toLocal8Bit();
+    // An explicitly empty language initializes the data path without loading
+    // recognition models (as used by Tesseract's --list-langs mode).
+    if (catalogue.Init(path.isEmpty() ? nullptr : path.constData(), "") != 0)
+        throw std::runtime_error("Cannot discover OCR languages. Check TESSDATA_PREFIX and installed Tesseract language data.");
     std::vector<std::string> languages;
-    m_api->GetAvailableLanguagesAsVector(&languages);
+    catalogue.GetAvailableLanguagesAsVector(&languages);
     QStringList result;
     for (const auto &language : languages) {
         if (language != "osd")
@@ -66,10 +71,13 @@ QStringList OcrEngine::available_languages() const {
 }
 
 void OcrEngine::set_languages(const QString &languages) {
+    if (languages.trimmed().isEmpty())
+        throw std::runtime_error("No OCR language selected. Install Tesseract language data and choose an OCR language.");
     if (m_config.langs == languages)
         return;
     auto api = std::make_unique<tesseract::TessBaseAPI>();
-    if (api->Init(nullptr, languages.toUtf8().constData()) != 0)
+    const auto path = m_config.data_path.toLocal8Bit();
+    if (api->Init(path.isEmpty() ? nullptr : path.constData(), languages.toUtf8().constData()) != 0)
         throw std::runtime_error("Could not initialize Tesseract for language: " + languages.toStdString());
     m_api = std::move(api);
     m_config.langs = languages;
@@ -80,6 +88,8 @@ QRect OcrEngine::qrect_from_tesseract_coord(int x1, int y1, int x2, int y2) {
 }
 
 QList<WordBox> OcrEngine::scan_image(const QImage &img) {
+    if (m_config.langs.isEmpty())
+        throw std::runtime_error("No OCR language selected. Install Tesseract language data and choose an OCR language.");
     PixPtr pix = to_pix(img);
     m_api->SetImage(pix.get());
 

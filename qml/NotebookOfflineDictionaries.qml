@@ -28,7 +28,9 @@ NotebookSurface {
             enabled: !settings.manager.busy
             Layout.fillWidth: true
             Layout.minimumWidth: 0
-            onLanguage_selected: function(code) { settings.word_language = code }
+            onLanguage_selected: function(code) {
+                settings.word_language = settings.manager.normalize_word_language(code) || code
+            }
         }
         Label { text: qsTr("Definitions in — which language do you read?"); font.pixelSize: 12 }
         RowLayout {

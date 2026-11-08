@@ -7,6 +7,10 @@ The word editor has independent choices for:
   more definition languages for each. For example, select Russian and German
   from Kaikki alongside English from FreeDictionaryAPI.
 
+Regional or script-qualified word-language codes such as `de-DE` and `pt-BR`
+use the dictionary's base language (`de`, `pt`), including offline packs and
+cache keys. Translator target variants remain independent and are retained.
+
 The editor shows a compact summary of the active sources and languages. The
 picker stages edits until **Apply**; **Cancel** or Esc discards them. Applying
 settings cancels outdated results but preserves typed word-card fields. Lookup
@@ -25,6 +29,8 @@ silently replaced with English Kaikki results.
 - All selected primary source/language pairs start concurrently.
 - **Use only as fallback** defers a source's selected languages until the primary
   sources have no full meanings, even after following their form links.
+  Previously discovered base-form links are replayed into newly started fallback
+  sources, with the same traversal-depth, word-count, and cycle limits.
 - Only explicitly selected sources are contacted. There is no implicit “other
   source” and no hardcoded two-provider search mode.
 - A failed pair does not discard successful results from other pairs.
@@ -134,8 +140,10 @@ In **Settings → Offline dictionaries**:
 3. Enable Kaikki and the matching definition language in **Sources & languages…**.
 4. Choose how Kaikki uses its downloaded data:
    - **When online lookup cannot connect**: try the online service first, then
-     downloaded data after a connection failure, timeout, rate limit, or server
-     failure. A normal online “entry not found” does not trigger this fallback.
+      downloaded data after a connection failure, timeout, rate limit, or server
+      failure. A normal online “entry not found” does not trigger this fallback.
+      Connection failures after receiving HTTP headers also trigger fallback;
+      malformed dictionary responses and explicit cancellation do not.
    - **Prefer downloaded data**: search the local index first; use online lookup
      if the local entry is missing or unreadable.
    - **Downloaded data only**: do not send Kaikki lookup requests, even if an

@@ -21,7 +21,7 @@ ColumnLayout {
     readonly property var current_sense: selected_sense >= 0 && selected_sense < service.senses.length
         ? service.senses[selected_sense] : ({})
     readonly property bool can_save: !busy && word_input.text.trim().length > 0
-        && (card_form.meaning.trim().length > 0 || (service.translator.configured && card_form.translation.trim().length > 0))
+        && (card_form.meaning.trim().length > 0 || card_form.translation.trim().length > 0)
         && (card_id.length === 0 || dirty)
     spacing: 10
 
@@ -73,12 +73,14 @@ ColumnLayout {
         service.lookup(word_input.text, context_input.text)
     }
     function native_translation(sense): string {
-        if (!service.translator.configured) return ""
         return (sense.translations || []).filter(function(item) {
             return item.language.code === editor.service.target_language
         }).map(function(item) { return item.word }).join(", ")
     }
     function select_sense(index: int) {
+        // A pending response belongs to the previous word/sense, even when
+        // the newly chosen sense has the same headword.
+        service.translator.clear()
         selected_sense = index
         if (current_sense.headword) word_input.text = current_sense.headword
         card_form.meaning = current_sense.definition || ""
@@ -96,7 +98,7 @@ ColumnLayout {
     function save_card() {
         if (!can_save) return
         if (service.save_word(card_id, word_input.text, context_input.text,
-                card_form.meaning, service.translator.configured ? card_form.translation : "",
+                card_form.meaning, card_form.translation,
                 card_form.notes, selected_sense, card_form.word_prefix, card_form.word_forms())) {
             if (card_id.length === 0) card_id = service.vocabulary[0].id
             dirty = false
@@ -112,11 +114,6 @@ ColumnLayout {
         function onTranslated(text) {
             card_form.translation = text
             editor.mark_dirty()
-        }
-        function onConfiguration_changed() {
-            // Never save hidden translations or allow old provider results to
-            // survive a configuration change.
-            card_form.translation = ""
         }
     }
 
@@ -298,8 +295,7 @@ ColumnLayout {
         Label {
             text: word_input.text.trim().length === 0 ? qsTr("Start with a word above.")
                 : card_form.meaning.trim().length === 0 && card_form.translation.trim().length === 0
-                    ? (editor.service.translator.configured ? qsTr("Choose a meaning or add a translation to save.")
-                        : qsTr("Choose a meaning to save."))
+                    ? qsTr("Choose a meaning or add a translation to save.")
                 : editor.card_id.length > 0 && !editor.dirty ? qsTr("✓ In your collection")
                 : qsTr("Ready to save · Ctrl+S")
             opacity: 0.6

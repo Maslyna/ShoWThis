@@ -33,7 +33,7 @@ NotebookSurface {
         word_prefix = card.article || ""
         load_forms(card)
         meaning = card.meaning || ""
-        translation = service.translator.configured ? card.translation || "" : ""
+        translation = card.translation || ""
         notes = card.notes || ""
         notes_toggle.checked = notes.length > 0
         scroll.contentItem.contentY = 0
@@ -201,7 +201,6 @@ NotebookSurface {
                     }
                 }
                 RowLayout {
-                    visible: form.service.translator.configured
                     Layout.fillWidth: true
                     Label { text: qsTr("Translation"); font.bold: true; font.pixelSize: 12; Layout.fillWidth: true }
                     NotebookLanguagePicker {
@@ -221,7 +220,6 @@ NotebookSurface {
                 TextArea {
                     id: translation_input
                     objectName: "word_translation"
-                    visible: form.service.translator.configured
                     Layout.fillWidth: true
                     font.pixelSize: 19
                     wrapMode: TextEdit.Wrap

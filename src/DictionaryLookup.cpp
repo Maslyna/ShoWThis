@@ -1,5 +1,6 @@
 #include "DictionaryLookup.h"
 #include "DictionaryData.h"
+#include "NotebookData.h"
 
 #include <QCryptographicHash>
 #include <QJsonDocument>
@@ -7,6 +8,29 @@
 #include <QtConcurrentRun>
 
 namespace showthis {
+namespace {
+
+bool connection_failure(QNetworkReply::NetworkError error) {
+    switch (error) {
+    case QNetworkReply::ConnectionRefusedError:
+    case QNetworkReply::RemoteHostClosedError:
+    case QNetworkReply::HostNotFoundError:
+    case QNetworkReply::TimeoutError:
+    case QNetworkReply::TemporaryNetworkFailureError:
+    case QNetworkReply::NetworkSessionFailedError:
+    case QNetworkReply::UnknownNetworkError:
+    case QNetworkReply::ProxyConnectionRefusedError:
+    case QNetworkReply::ProxyConnectionClosedError:
+    case QNetworkReply::ProxyNotFoundError:
+    case QNetworkReply::ProxyTimeoutError:
+    case QNetworkReply::UnknownProxyError:
+        return true;
+    default:
+        return false;
+    }
+}
+
+}  // namespace
 
 DictionaryLookup::DictionaryLookup(QNetworkAccessManager *network, QObject *parent, DictionaryProviders providers)
     : QObject(parent), m_providers(std::move(providers)), m_network(network) {}
@@ -93,7 +117,7 @@ QString DictionaryLookup::cache_key(const QString &language, const QString &word
         configuration.insert("data_revision", options.data_revision);
     const auto digest = QCryptographicHash::hash(QJsonDocument(configuration).toJson(QJsonDocument::Compact),
         QCryptographicHash::Sha256).toHex();
-    return language + ':' + word + '|' + QString::fromLatin1(digest);
+    return dictionary_language_code(language) + ':' + word + '|' + QString::fromLatin1(digest);
 }
 
 void DictionaryLookup::cancel() {
@@ -117,10 +141,11 @@ void DictionaryLookup::cancel() {
 void DictionaryLookup::lookup(const QString &word, const QString &language, const DictionaryOptions &options) {
     cancel();
     m_word = word;
-    m_language = language;
+    m_language = dictionary_language_code(language);
     m_options = options;
     m_active.clear();
     m_entries.clear();
+    m_form_targets.clear();
     m_visited.clear();
     m_errors.clear();
     m_missing.clear();
@@ -128,6 +153,10 @@ void DictionaryLookup::lookup(const QString &word, const QString &language, cons
     m_local_attempted.clear();
     m_unavailable_network.clear();
     m_notices.clear();
+    if (m_language.isEmpty()) {
+        emit finished({}, tr("Choose a valid word language."), false);
+        return;
+    }
     // Validate direct C++ callers as well as configurations originating in QML.
     for (const auto &target : options.targets) {
         const auto *source = provider(target.provider);
@@ -169,7 +198,7 @@ void DictionaryLookup::send(DictionaryRequest request, ResponseHandler handler) 
             : reply->error() == QNetworkReply::NoError ? QString{} : reply->errorString();
         reply->deleteLater();
         if (generation == m_generation)
-            handler(body, status, error);
+            handler(body, status, error, reply->error());
     });
 }
 
@@ -235,12 +264,15 @@ void DictionaryLookup::fetch_request(const DictionaryTarget &target, const QStri
         fail_word(target, word, tr("Dictionary request exceeded the stage limit."));
         return;
     }
-    send(request, [this, target, word, depth, request, stage](const QByteArray &body, int status, const QString &error) {
+    send(request, [this, target, word, depth, request, stage](const QByteArray &body, int status,
+        const QString &error, QNetworkReply::NetworkError network_error) {
         if (!error.isEmpty()) {
             const auto message = status == 404 ? tr("No dictionary entry found.")
                 : status == 429 ? tr("Dictionary rate limit reached. Please try again later.")
                 : status == 200 ? error : tr("Dictionary request failed (%1).").arg(status);
-            if (status == 0 || status == 408 || status == 429 || status >= 500) {
+            if (network_error != QNetworkReply::OperationCanceledError
+                && (status == 0 || status == 408 || status == 429 || status >= 500
+                    || connection_failure(network_error))) {
                 m_unavailable_network.insert(target.provider);
                 if (provider(target.provider)->access() != DictionaryAccess::NetworkOnly && try_local(target, word, depth, false, message))
                     return;
@@ -282,8 +314,14 @@ void DictionaryLookup::consume(const DictionaryTarget &target, const QString &wo
     }
     if (m_options.follow_forms) {
         for (const auto &base : dictionary_form_targets(document, m_language)) {
-            if (base == word)
+            if (base == word || depth >= 2)
                 continue;
+            const auto known = std::find_if(m_form_targets.begin(), m_form_targets.end(),
+                [&](const auto &item) { return item.first == base; });
+            if (known == m_form_targets.end())
+                m_form_targets.append({base, depth + 1});
+            else
+                known->second = qMin(known->second, depth + 1);
             for (const auto &active : m_active)
                 fetch_word(active, base, depth + 1);
         }
@@ -327,8 +365,13 @@ void DictionaryLookup::maybe_finish() {
         }
         if (!fallbacks.isEmpty()) {
             m_starting = true;
-            for (const auto &target : fallbacks)
+            for (const auto &target : fallbacks) {
                 fetch_word(target, m_word, 0);
+                // These references may have arrived before this source became
+                // active. Replay them with their original traversal depths.
+                for (const auto &[base, depth] : m_form_targets)
+                    fetch_word(target, base, depth);
+            }
             m_starting = false;
             maybe_finish();
             return;

@@ -183,6 +183,53 @@ private slots:
         QVERIFY(finished[0][2].toBool());
     }
 
+    void fallback_replays_primary_base_forms_data() {
+        QTest::addColumn<bool>("follow_forms");
+        QTest::newRow("follow") << true;
+        QTest::newRow("manual-only") << false;
+    }
+
+    void fallback_replays_primary_base_forms() {
+        QFETCH(bool, follow_forms);
+        TestNetwork network;
+        const auto word = QString::fromUtf8("Häuser");
+        network.responder = [word](const QNetworkRequest &request) -> TestNetwork::Response {
+            const auto path = request.url().path();
+            if (request.url().host() == "freedictionaryapi.com")
+                return path.endsWith(word) ? TestNetwork::Response{free_entry(word, "plural of Haus", "Haus")}
+                                           : TestNetwork::Response{{}, 404};
+            if (path.endsWith(QString::fromUtf8("hä.json"))) return {{}, 404};
+            if (path.endsWith("ha.json")) return {kaikki_index("Haus", "ru")};
+            return {kaikki_entry("Haus", "house from fallback")};
+        };
+        showthis::DictionaryLookup lookup(&network);
+        QSignalSpy finished(&lookup, &showthis::DictionaryLookup::finished);
+        lookup.lookup(word, "de", {{{"freedictionary", "en"}, {"kaikki", "ru", true}}, follow_forms});
+        QTRY_COMPARE(finished.size(), 1);
+        QVERIFY(!lookup.busy());
+        const auto entries = senses(finished);
+        const auto resolved = std::count_if(entries.begin(), entries.end(), [](const QVariant &value) {
+            return value.toMap().value("definition").toString() == "house from fallback";
+        });
+        QCOMPARE(resolved, follow_forms ? 1 : 0);
+        QCOMPARE(std::count_if(network.requests.begin(), network.requests.end(), [](const QNetworkRequest &request) {
+            return request.url().host() == "kaikki.org" && request.url().path().endsWith("ha.json");
+        }), follow_forms ? 1 : 0);
+    }
+
+    void regional_word_language_uses_dictionary_base_language() {
+        TestNetwork network;
+        network.response = free_entry("Haus", "house");
+        showthis::DictionaryLookup lookup(&network);
+        QSignalSpy finished(&lookup, &showthis::DictionaryLookup::finished);
+        lookup.lookup("Haus", "de-DE", {});
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(network.requests[0].url().path(), QString("/api/v1/entries/de/Haus"));
+        QCOMPARE(senses(finished).size(), 1);
+        QCOMPARE(showthis::DictionaryLookup::cache_key("de-DE", "Haus", {}),
+            showthis::DictionaryLookup::cache_key("de", "Haus", {}));
+    }
+
     void network_destruction_before_lookup_is_safe() {
         auto owner = std::make_unique<QObject>();
         auto *network = new TestNetwork;

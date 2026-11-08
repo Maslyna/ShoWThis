@@ -1,5 +1,6 @@
 #include "FreeDictionaryProvider.h"
 #include "DictionaryData.h"
+#include "NotebookData.h"
 
 #include <QJsonDocument>
 #include <QObject>
@@ -16,7 +17,7 @@ QVariantList FreeDictionaryProvider::definition_languages() const {
 
 DictionaryRequest FreeDictionaryProvider::request(const QString &word, const QString &word_language, const QString &) const {
     const auto url = QUrl::fromEncoded("https://freedictionaryapi.com/api/v1/entries/"
-        + word_language.toUtf8() + '/' + QUrl::toPercentEncoding(word) + "?translations=true");
+        + dictionary_language_code(word_language).toUtf8() + '/' + QUrl::toPercentEncoding(word) + "?translations=true");
     return {QNetworkRequest(url), "GET", {}, {}};
 }
 

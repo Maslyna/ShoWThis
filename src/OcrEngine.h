@@ -25,6 +25,7 @@ struct WordBox {
 
 struct OcrEngineConfig {
     QString langs;
+    QString data_path;
 };
 
 struct PixDeleter {
@@ -35,7 +36,7 @@ using PixPtr = std::unique_ptr<Pix, PixDeleter>;
 
 class OcrEngine {
 public:
-    explicit OcrEngine(OcrEngineConfig config);
+    explicit OcrEngine(OcrEngineConfig config = {});
 
     ~OcrEngine();
 
