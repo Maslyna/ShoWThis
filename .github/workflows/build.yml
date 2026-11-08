@@ -1,0 +1,35 @@
+name: Build and test
+on: [push, pull_request]
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizers: ['OFF', 'ON']
+    steps:
+      - name: Install build and test dependencies
+        run: >-
+          dnf install -y git gcc-c++ cmake make pkgconf-pkg-config
+          qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtwayland-devel
+          layer-shell-qt-devel tesseract-devel leptonica-devel zlib-devel
+          tesseract-langpack-deu dbus-daemon libasan libubsan
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug -DSHOWTHIS_ENABLE_SANITIZERS=${{ matrix.sanitizers }}
+      - name: Build
+        run: cmake --build build -j 4
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+        run: ctest --test-dir build --output-on-failure
+      - name: Check installation layout
+        if: matrix.sanitizers == 'OFF'
+        env:
+          DESTDIR: /tmp/showthis-install
+        run: |
+          cmake --install build
+          test -x "$DESTDIR/usr/local/bin/ShoWThis"
+          test -f "$DESTDIR/usr/local/share/applications/dev.maslyna.ShoWThis.desktop"

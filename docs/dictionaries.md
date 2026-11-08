@@ -187,6 +187,10 @@ downloads are removed after completion/cancellation; only the indexed database
 is retained. Removing an edition does not remove saved cards or lookup history.
 Installed revisions and access policy separate lookup cache keys so an update
 does not silently keep returning results from an older pack.
+Only packs relevant to the selected provider/word/definition language affect a
+lookup's revision; unrelated installations do not invalidate its cached result.
+History opens the exact saved result without network access, even if its pack
+was updated or removed. The normal Look up and Refresh actions use current data.
 
 Installation currently requires Qt SQL's **QSQLITE** driver and zlib. Safety
 limits are 32 GiB compressed per download, 128 GiB expanded per edition, and
@@ -211,4 +215,8 @@ exercise this without adding another production network service.
 
 Providers with local datasets can additionally expose an access policy and a
 thread-safe local lookup job. The generic scheduler runs those jobs off the UI
-thread, ignores cancelled results, and applies the same form-following rules.
+thread, passes a cooperative cancellation token, ignores cancelled results, and
+applies the same form-following rules. Initialize provider-owned state through
+`initialize()`, expose its generic `DictionaryProviderState` notifier and optional
+settings component, and return a per-language-pair `revision()` token. New local
+providers do not require `LearningService` ownership or cache-key branches.

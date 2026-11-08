@@ -26,8 +26,7 @@ ColumnLayout {
     Connections {
         target: page.service
         function onVocabulary_changed() {
-            const existing = new Set(page.service.vocabulary.map(function(card) { return card.id }))
-            page.selected_cards = page.selected_cards.filter(function(id) { return existing.has(id) })
+            page.selected_cards = page.selected_cards.filter(function(id) { return page.service.vocabulary_model.contains(id) })
         }
     }
     RowLayout {
@@ -40,6 +39,7 @@ ColumnLayout {
             placeholderText: qsTr("Search words, meanings, or sentences…")
             selectByMouse: true
             Accessible.name: qsTr("Search saved vocabulary")
+            onTextChanged: page.service.vocabulary_model.filter = text
         }
         NotebookButton {
             objectName: "export_anki"
@@ -61,7 +61,7 @@ ColumnLayout {
             text: page.selected_cards.length > 0 ? qsTr("Clear selection") : qsTr("Select shown")
             enabled: list.count > 0 || page.selected_cards.length > 0
             onClicked: page.selected_cards = page.selected_cards.length > 0 ? []
-                : list.model.map(function(card) { return card.id })
+                : Array.from(page.service.vocabulary_model.visible_ids)
         }
     }
     NotebookSurface {
@@ -74,10 +74,7 @@ ColumnLayout {
             anchors.fill: parent
             clip: true
             spacing: 2
-            model: page.service.vocabulary.filter(function(card) {
-                return [card.word, card.meaning, card.translation, card.context, card.notes]
-                    .join(" ").toLowerCase().includes(search.text.toLowerCase())
-            })
+            model: page.service.vocabulary_model
             ScrollBar.vertical: ScrollBar {}
             NotebookEmpty {
                 anchors.fill: parent

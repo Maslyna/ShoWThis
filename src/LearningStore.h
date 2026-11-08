@@ -23,6 +23,7 @@ public:
 
     QString file_name() const { return m_file_name; }
     QString error() const { return m_error; }
+    bool readable() const { return m_readable; }
 
 private:
     QString m_file_name;

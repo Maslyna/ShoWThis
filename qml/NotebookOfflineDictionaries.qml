@@ -5,7 +5,7 @@ import QtQuick.Layouts
 NotebookSurface {
     id: settings
     required property var service
-    readonly property var manager: service.offline_dictionaries
+    required property var manager
     property string word_language: service.source_language
     objectName: "offline_dictionary_settings"
     Layout.fillWidth: true

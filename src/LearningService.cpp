@@ -1,6 +1,7 @@
 #include "LearningService.h"
 #include "AnkiExporter.h"
 #include "NotebookData.h"
+#include "CardForms.h"
 
 #include <QDateTime>
 #include <QJsonDocument>
@@ -24,18 +25,33 @@ QString single_article(const QVariantMap &sense) {
 LearningService::LearningService(QObject *parent, const QString &file_name,
                                  QNetworkAccessManager *network, DictionaryProviders providers)
     : QObject(parent), m_network(network ? network : new QNetworkAccessManager(this)),
-      m_offline(new KaikkiOfflineStore(m_network, file_name.isEmpty() ? QString{} : QFileInfo(file_name).absolutePath() + "/kaikki", this)),
-      m_dictionary(new DictionaryLookup(m_network, this, providers.empty() ? default_dictionary_providers(m_offline) : std::move(providers))),
+      m_dictionary(new DictionaryLookup(m_network, this, providers.empty() ? default_dictionary_providers() : std::move(providers),
+          file_name.isEmpty() ? QString{} : QFileInfo(file_name).absolutePath())),
       m_translator(new TranslationService(this, m_network)),
-      m_store(file_name) {
+      m_store(file_name), m_lookup_cache(m_store.file_name() + ".lookups.json") {
+    connect(&m_lookup_cache, &LookupCacheStore::error_occurred, this, [this](const QString &message) {
+        set_message(message);
+    });
+    connect(&m_lookup_cache, &LookupCacheStore::error_changed, this, &LearningService::vocabulary_changed);
+    connect(this, &LearningService::vocabulary_changed, this, [this]() { m_vocabulary_model.replace(m_cards); });
+    connect(this, &LearningService::history_changed, this, [this]() { m_history_model.replace(m_history); });
     connect(m_translator, &TranslationService::error_occurred, this, &LearningService::set_message);
     connect(m_translator, &TranslationService::configuration_changed, this, [this]() { set_message({}); });
-    connect(m_offline, &KaikkiOfflineStore::data_changed, this, [this]() {
-        clear();
-        emit preferences_changed();
+    connect(m_dictionary, &DictionaryLookup::provider_data_changed, this, [this]() {
+        const auto revision = m_dictionary->revision(m_source_language, m_dictionary_options);
+        if (m_dictionary_options.data_revision != revision) {
+            m_dictionary_options.data_revision = revision;
+            clear();
+        }
     });
     connect(m_dictionary, &DictionaryLookup::finished, this,
         [this](const QJsonObject &data, const QString &message, bool cacheable) {
+            if (dictionary_senses(data, m_source_language).isEmpty() && !m_stale_cache.isEmpty()) {
+                display_dictionary(m_stale_cache);
+                set_message(tr("Refresh failed; showing the previous cached lookup. %1").arg(message));
+                m_stale_cache = {};
+                return;
+            }
             display_dictionary(data);
             if (!message.isEmpty())
                 set_message(message);
@@ -59,9 +75,31 @@ LearningService::LearningService(QObject *parent, const QString &file_name,
     m_history_limit = qBound(0, m_settings.value("learning/history_limit", 1000).toInt(), 10000);
 
     const auto contents = m_store.load(m_history_limit);
+    m_has_legacy_cache = !contents.cache.isEmpty() || !contents.history.isEmpty();
     m_cards = contents.cards;
-    m_cache = contents.cache;
-    m_history = contents.history;
+    const auto lookups = m_lookup_cache.load(contents);
+    m_cache = lookups.cache;
+    m_history = lookups.history;
+    for (auto it = m_cache.begin(); it != m_cache.end();) {
+        if (!it.value().isObject()) {
+            it = m_cache.erase(it);
+            continue;
+        }
+        auto document = it.value().toObject();
+        if (!document.contains("_cached_at")) {
+            document.insert("_cached_at", QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+            it.value() = document;
+        }
+        ++it;
+    }
+    trim_cache(m_history, m_cache, m_history_limit);
+    m_vocabulary_model.replace(m_cards);
+    m_history_model.replace(m_history);
+}
+
+LearningService::~LearningService() {
+    m_lookup_cache.flush();
+    m_lookup_cache.disconnect(this);
 }
 
 void LearningService::set_message(const QString &message) {
@@ -77,6 +115,7 @@ void LearningService::clear() {
     m_lookup_word.clear();
     m_lookup_context.clear();
     m_lookup_key.clear();
+    m_stale_cache = {};
     set_message({});
     emit lookup_changed();
 }
@@ -116,10 +155,32 @@ bool LearningService::configure_dictionaries(const QVariantList &selection, bool
     clear();
     m_dictionary_options = options;
     m_dictionary_selection = normalized;
-    m_settings.setValue("dictionary/selection", normalized);
-    m_settings.setValue("dictionary/follow_forms", follow_forms);
+    if (!m_transient_preferences) {
+        m_settings.setValue("dictionary/selection", normalized);
+        m_settings.setValue("dictionary/follow_forms", follow_forms);
+    }
     emit preferences_changed();
     return true;
+}
+
+void LearningService::prepare_draft(const QVariantMap &configuration, bool use_defaults) {
+    // Viewing a saved card/history item is not an edit to application defaults.
+    m_transient_preferences = true;
+    auto source = dictionary_language_code(m_settings.value("learning/source_language", "en").toString());
+    auto target = normalized_language_code(m_settings.value("learning/target_language",
+        QLocale::languageToCode(QLocale::system().language())).toString());
+    if (source.isEmpty()) source = "en";
+    if (target.isEmpty()) target = "en";
+    set_source_language(configuration.value("language", source).toString());
+    set_target_language(configuration.value("target_language", target).toString());
+    const QVariantList defaults{QVariantMap{{"provider", "freedictionary"}, {"languages", QStringList{"en"}}, {"fallback", false}}};
+    if (!configure_dictionaries(configuration.value("dictionary_selection", m_settings.value("dictionary/selection", defaults)).toList(),
+            configuration.value("follow_forms", m_settings.value("dictionary/follow_forms", true)).toBool())) {
+        const auto error = m_message;
+        configure_dictionaries(defaults, true);
+        set_message(tr("%1 Using the default dictionary selection for this draft.").arg(error));
+    }
+    m_transient_preferences = !use_defaults;
 }
 
 void LearningService::set_source_language(const QString &language) {
@@ -131,7 +192,8 @@ void LearningService::set_source_language(const QString &language) {
     if (code == m_source_language)
         return;
     m_source_language = code;
-    m_settings.setValue("learning/source_language", code);
+    if (!m_transient_preferences)
+        m_settings.setValue("learning/source_language", code);
     clear();
     emit preferences_changed();
 }
@@ -145,7 +207,8 @@ void LearningService::set_target_language(const QString &language) {
     if (code == m_target_language)
         return;
     m_target_language = code;
-    m_settings.setValue("learning/target_language", code);
+    if (!m_transient_preferences)
+        m_settings.setValue("learning/target_language", code);
     m_translator->clear();
     emit preferences_changed();
 }
@@ -156,8 +219,8 @@ void LearningService::set_history_limit(int limit) {
         return;
     auto history = m_history;
     auto cache = m_cache;
-    LearningStore::trim_history(history, cache, limit);
-    if (!write_store(m_cards, cache, history))
+    trim_cache(history, cache, limit);
+    if (!write_store(m_cards, cache, history, true))
         return;
     m_history = history;
     m_cache = cache;
@@ -177,17 +240,23 @@ void LearningService::remember_lookup(const QString &key, const QString &context
             history.removeAt(i);
     }
     history.prepend(QVariantMap{{"key", key}, {"word", m_lookup_word},
-        {"language", m_source_language}, {"context", context.trimmed()},
+        {"language", m_source_language}, {"context", context.trimmed().left(4096)},
         {"dictionary_selection", dictionary_selection()}, {"follow_forms", follow_forms()},
         {"summary", m_senses.value(0).toMap().value("definition").toString()},
         {"last_lookup", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}});
     auto cache = m_cache;
-    cache.insert(key, data);
-    LearningStore::trim_history(history, cache, m_history_limit);
+    auto document = data;
+    if (!document.contains("_cached_at"))
+        document.insert("_cached_at", QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+    cache.insert(key, document);
+    m_cache_sizes.remove(key);
+    trim_cache(history, cache, m_history_limit);
     if (write_store(m_cards, cache, history)) {
         m_history = history;
         m_cache = cache;
         emit history_changed();
+        if (!m_cache.contains(key))
+            set_message(tr("This lookup exceeded the history storage limits. Saved vocabulary is unaffected."));
     }
 }
 
@@ -195,7 +264,8 @@ bool LearningService::clear_history() {
     // Do not let an already-running lookup repopulate history after clearing.
     m_dictionary->cancel();
     emit lookup_changed();
-    if (!write_store(m_cards, {}, {}))
+    m_lookup_cache.allow_reset();
+    if (!write_store(m_cards, {}, {}, true))
         return false;
     m_cache = {};
     m_history.clear();
@@ -212,7 +282,7 @@ void LearningService::display_dictionary(const QJsonObject &data) {
     emit lookup_changed();
 }
 
-void LearningService::lookup(const QString &word, const QString &context) {
+void LearningService::lookup(const QString &word, const QString &context, bool refresh) {
     clear();
     m_lookup_word = word.trimmed();
     if (m_lookup_word.isEmpty()) {
@@ -220,17 +290,43 @@ void LearningService::lookup(const QString &word, const QString &context) {
         return;
     }
     m_lookup_context = context;
-    m_dictionary_options.data_revision = m_offline->cache_token();
+    m_dictionary_options.data_revision = m_dictionary->revision(m_source_language, m_dictionary_options);
     m_lookup_key = DictionaryLookup::cache_key(m_source_language, m_lookup_word, m_dictionary_options);
     if (m_cache.contains(m_lookup_key)) {
         const auto data = m_cache.value(m_lookup_key).toObject();
-        display_dictionary(data);
-        remember_lookup(m_lookup_key, context, data);
-        set_message(tr("Loaded from local dictionary cache."));
-        return;
+        const auto fetched = QDateTime::fromString(data.value("_cached_at").toString(), Qt::ISODate);
+        const auto age = fetched.secsTo(QDateTime::currentDateTimeUtc());
+        const bool fresh = fetched.isValid() && age >= 0 && age <= 7 * 24 * 60 * 60;
+        if (!refresh && fresh) {
+            display_dictionary(data);
+            remember_lookup(m_lookup_key, context, data);
+            set_message(tr("Loaded from local dictionary cache."));
+            return;
+        }
+        m_stale_cache = data;
     }
     m_dictionary->lookup(m_lookup_word, m_source_language, m_dictionary_options);
     emit lookup_changed();
+}
+
+bool LearningService::lookup_history(const QString &key) {
+    clear();
+    if (!m_cache.value(key).isObject()) {
+        set_message(tr("This cached lookup is no longer available. Press Look up to fetch it again."));
+        return false;
+    }
+    for (const auto &value : m_history) {
+        const auto entry = value.toMap();
+        if (entry.value("key").toString() != key) continue;
+        prepare_draft(entry, false);
+        m_lookup_word = entry.value("word").toString();
+        m_lookup_context = entry.value("context").toString();
+        m_lookup_key = key;
+        display_dictionary(m_cache.value(key).toObject());
+        set_message(tr("Loaded the saved lookup from history (no network request)."));
+        return true;
+    }
+    return false;
 }
 
 void LearningService::translate(const QString &word, const QString &context) {
@@ -238,13 +334,30 @@ void LearningService::translate(const QString &word, const QString &context) {
     m_translator->translate(word, context, m_source_language, m_target_language);
 }
 
+KaikkiOfflineStore *LearningService::offline_dictionaries() const {
+    return qobject_cast<KaikkiOfflineStore *>(m_dictionary->settings("kaikki"));
+}
+
 bool LearningService::write_store(const QVariantList &cards, const QJsonObject &cache,
-                                  const QVariantList &history) {
+                                  const QVariantList &history, bool synchronous_cache, bool vocabulary_write) {
     const auto previous_error = m_store.error();
-    const bool success = m_store.save(cards, cache, history);
+    const bool persist_vocabulary = vocabulary_write || cards != m_cards;
+    bool success = m_store.readable();
+    if (success)
+        success = m_lookup_cache.submit(cache, history, synchronous_cache || persist_vocabulary);
+    // Vocabulary is not rewritten for lookups/history. Flush the sidecar before
+    // removing legacy embedded caches during the next explicit vocabulary save.
+    if (persist_vocabulary && m_store.readable() && (success || !m_has_legacy_cache)) {
+        success = m_store.save(cards, {}, {});
+        if (success) m_has_legacy_cache = false;
+    }
     if (!success || previous_error != m_store.error())
         emit vocabulary_changed();
     return success;
+}
+
+void LearningService::trim_cache(QVariantList &history, QJsonObject &cache, int limit) {
+    LookupCacheStore::trim(history, cache, limit, m_cache_sizes);
 }
 
 bool LearningService::save_word(const QString &id, const QString &word, const QString &context,
@@ -303,66 +416,27 @@ bool LearningService::save_word(const QString &id, const QString &word, const QS
         return word_forms.contains(key) ? word_forms.value(key)
             : unchanged && sense_index < 0 && old.contains(key) ? old.value(key) : sense.value(key);
     };
-    for (const auto &key : {"base_form", "base_article", "singular_forms", "plural_forms"}) {
-        const auto data = form_value(key);
-        if (QString(key) == "plural_forms" || QString(key) == "singular_forms") {
-            QStringList plurals;
-            for (const auto &plural : data.toStringList()) {
-                const auto text = plural.trimmed();
-                if (text.size() > 200 || text.contains(QRegularExpression("[\\r\\n\\t]"))) {
-                    set_message(tr("Keep each number form to one line, at most 200 characters."));
-                    return false;
-                }
-                if (!text.isEmpty() && !plurals.contains(text))
-                    plurals.append(text);
-            }
-            if (plurals.size() > 20) {
-                set_message(tr("Keep at most 20 alternatives per number form."));
-                return false;
-            }
-            card.insert(key, plurals);
-        } else {
-            const auto text = data.toString().trimmed();
-            const int limit = QString(key) == "base_article" ? 80 : 200;
-            if (text.size() > limit || text.contains(QRegularExpression("[\\r\\n\\t]"))) {
-                set_message(tr("Keep the base form and its prefix to one short line each."));
-                return false;
-            }
-            card.insert(key, text);
-        }
-    }
-    const bool number_relevant = form_value("number_relevant").toBool();
-    card.insert("number_relevant", number_relevant);
-    card.insert("grammar_profile", form_value("grammar_profile").toString());
-    for (const auto &number : {QStringLiteral("singular"), QStringLiteral("plural")}) {
-        auto status = form_value(number + "_status").toString();
-        if (status.isEmpty())
-            status = "unknown";
-        if (status != "unknown" && status != "available" && status != "unavailable" && status != "not_applicable") {
-            set_message(tr("Invalid number-form status."));
-            return false;
-        }
-        const bool has_forms = !card.value(number + "_forms").toStringList().isEmpty();
-        card.insert(number + "_status", !number_relevant ? "not_applicable" : has_forms ? "available"
-            : status == "available" || status == "not_applicable" ? "unknown" : status);
-    }
+    QVariantMap form_fields;
+    for (const auto *key : {"base_form", "base_article", "singular_forms", "plural_forms", "number_relevant",
+             "grammar_profile", "singular_status", "plural_status", "article_origin", "base_article_origin"})
+        form_fields.insert(key, form_value(key));
     for (const auto &field : {QStringLiteral("article"), QStringLiteral("base_article")}) {
         const auto origin_key = field + "_origin";
-        auto origin = form_value(origin_key).toString();
         if ((field == "article" && article != "auto" && !word_forms.contains(origin_key))
             || (field == "base_article" && word_forms.contains(field) && !word_forms.contains(origin_key)))
-            origin = "manual";
-        if (origin != "" && origin != "dictionary" && origin != "profile" && origin != "manual") {
-            set_message(tr("Invalid article origin."));
-            return false;
-        }
-        card.insert(origin_key, card.value(field).toString().isEmpty() ? QString{} : origin);
+            form_fields.insert(origin_key, "manual");
     }
+    QString form_error;
+    const auto forms = CardForms::parse(form_fields, form_error);
+    if (!forms) { set_message(form_error); return false; }
+    const auto normalized_forms = forms->fields(word_prefix);
+    for (auto it = normalized_forms.constBegin(); it != normalized_forms.constEnd(); ++it)
+        card.insert(it.key(), it.value());
     if (existing >= 0)
         cards[existing] = card;
     else
         cards.prepend(card);
-    if (!write_store(cards, m_cache, m_history))
+    if (!write_store(cards, m_cache, m_history, false, true))
         return false;
     m_cards = cards;
     emit vocabulary_changed();
@@ -375,7 +449,7 @@ bool LearningService::remove_word(const QString &id) {
     for (int i = 0; i < cards.size(); ++i) {
         if (cards[i].toMap().value("id").toString() == id) {
             cards.removeAt(i);
-            if (!write_store(cards, m_cache, m_history))
+            if (!write_store(cards, m_cache, m_history, false, true))
                 return false;
             m_cards = cards;
             emit vocabulary_changed();

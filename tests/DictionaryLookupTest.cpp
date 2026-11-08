@@ -365,6 +365,7 @@ private slots:
         QCOMPARE(service.senses().size(), 2);
         QCOMPARE(service.dictionary_history().size(), 4);
         QCOMPARE(service.dictionary_history()[0].toMap().value("dictionary_selection").toList(), service.dictionary_selection());
+        QVERIFY(service.flush_cache());
         showthis::LearningService reopened(nullptr, path, &network);
         QCOMPARE(reopened.dictionary_selection(), service.dictionary_selection());
         reopened.lookup("Haus");

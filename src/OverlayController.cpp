@@ -133,6 +133,8 @@ void OverlayController::scan_finished() {
 }
 
 void OverlayController::wait_for_finished() {
+    if (m_cancel)
+        m_cancel();
     m_watcher.waitForFinished();
 }
 

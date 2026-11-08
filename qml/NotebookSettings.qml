@@ -68,8 +68,17 @@ ScrollView {
             Layout.fillWidth: true
         }
 
-        NotebookOfflineDictionaries {
-            service: settings_page.service
+        Repeater {
+            model: settings_page.service.dictionary_sources
+            Loader {
+                required property var modelData
+                Layout.fillWidth: true
+                active: !!modelData.settings && !!modelData.settings_component
+                Component.onCompleted: {
+                    if (active) setSource(Qt.resolvedUrl(modelData.settings_component),
+                        {service: settings_page.service, manager: modelData.settings})
+                }
+            }
         }
 
         NotebookSurface {
@@ -79,7 +88,7 @@ ScrollView {
                 spacing: 10
                 Label { text: qsTr("Your data stays here"); font.pixelSize: 17; font.bold: true }
                 Label {
-                    text: qsTr("Back up this file to keep your saved words, notes, and history. The file is local, but not encrypted.")
+                    text: qsTr("Back up the vocabulary file to keep your saved words and notes. Recent lookups use a separate disposable cache. Both files are local, but not encrypted.")
                     opacity: 0.65
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
@@ -90,6 +99,13 @@ ScrollView {
                     readOnly: true
                     selectByMouse: true
                     wrapMode: TextEdit.WrapAnywhere
+                    Layout.fillWidth: true
+                }
+                Label {
+                    text: qsTr("Lookup cache: %1").arg(settings_page.service.cache_path)
+                    textFormat: Text.PlainText
+                    wrapMode: Text.WrapAnywhere
+                    font.pixelSize: 10
                     Layout.fillWidth: true
                 }
             }

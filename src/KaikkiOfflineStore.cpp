@@ -98,7 +98,7 @@ QNetworkRequest download_request(const QUrl &url) {
 }  // namespace
 
 KaikkiOfflineStore::KaikkiOfflineStore(QNetworkAccessManager *network, const QString &directory, QObject *parent)
-    : QObject(parent), m_network(network),
+    : DictionaryProviderState(parent), m_network(network),
       m_directory(directory.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/kaikki" : directory),
       m_mode(m_settings.value("dictionary/offline_mode", "fallback").toString()),
       m_watcher(new QFutureWatcher<ImportResult>(this)) {
@@ -127,6 +127,10 @@ KaikkiOfflineStore::KaikkiOfflineStore(QNetworkAccessManager *network, const QSt
 }
 
 KaikkiOfflineStore::~KaikkiOfflineStore() {
+    // Cancellation may update progress; never notify QML while provider-owned
+    // state (or its containing service) is already being torn down.
+    blockSignals(true);
+    m_timer.stop();
     cancel();
     m_watcher->disconnect(this);
     m_watcher->waitForFinished();
@@ -193,10 +197,31 @@ void KaikkiOfflineStore::set_mode(const QString &mode) {
     emit data_changed();
 }
 
-QString KaikkiOfflineStore::cache_token() const {
-    if (m_packs.isEmpty() && m_mode == "fallback")
+QString KaikkiOfflineStore::cache_token(const QString &word_language, const QString &edition) const {
+    QVariantList packs;
+    if (m_mode != "online_only") {
+        for (const auto &value : m_packs) {
+            const auto pack = value.toMap();
+            if ((edition.isEmpty() || pack.value("edition").toString() == edition)
+                && (word_language.isEmpty() || pack.value("word_language").toString().isEmpty()
+                    || pack.value("word_language").toString() == word_language))
+                packs.append(QVariantMap{{"edition", pack.value("edition")}, {"word_language", pack.value("word_language")},
+                    {"revision", pack.value("revision")}});
+        }
+    }
+    if (!word_language.isEmpty() && !edition.isEmpty()) {
+        // Match lookup's precedence: a specific-language pack shadows an
+        // all-language pack, so updating the unused pack is irrelevant.
+        for (const auto &value : packs) {
+            if (value.toMap().value("word_language").toString() == word_language) {
+                packs = {value};
+                break;
+            }
+        }
+    }
+    if (packs.isEmpty() && m_mode == "fallback")
         return {};
-    const QJsonObject data{{"mode", m_mode}, {"packs", QJsonArray::fromVariantList(m_packs)}};
+    const QJsonObject data{{"mode", m_mode}, {"packs", QJsonArray::fromVariantList(packs)}};
     return QString::fromLatin1(QCryptographicHash::hash(QJsonDocument(data).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256).toHex());
 }
 
@@ -546,7 +571,8 @@ KaikkiOfflineStore::ImportResult KaikkiOfflineStore::import_pack(const std::shar
     return {};
 }
 
-std::optional<KaikkiOfflineStore::Lookup> KaikkiOfflineStore::lookup(const QString &edition, const QString &requested_language, const QString &word) const {
+std::optional<KaikkiOfflineStore::Lookup> KaikkiOfflineStore::lookup(const QString &edition, const QString &requested_language,
+    const QString &word, const LookupCancellation &cancellation) const {
     const auto language = dictionary_language_code(requested_language);
     if (language.isEmpty())
         return {};
@@ -568,16 +594,20 @@ std::optional<KaikkiOfflineStore::Lookup> KaikkiOfflineStore::lookup(const QStri
     if (!installed)
         return {};
     const auto path = pack_path(edition, scope);
-    return [path, edition, language, word]() { return read_word(path, edition, language, word); };
+    return [path, edition, language, word, cancellation]() { return read_word(path, edition, language, word, cancellation); };
 }
 
-DictionaryResponse KaikkiOfflineStore::read_word(const QString &path, const QString &edition, const QString &language, const QString &word) {
+DictionaryResponse KaikkiOfflineStore::read_word(const QString &path, const QString &edition, const QString &language,
+    const QString &word, const LookupCancellation &cancellation) {
+    const auto cancelled = [&]() { return cancellation && cancellation->load(); };
+    if (cancelled()) return {{}, {}, tr("Lookup cancelled.")};
     Database db;
     if (!db.open(path, true))
         return {{}, {}, tr("Cannot read the downloaded dictionary. Download it again.")};
     QString resolved = word;
     QSet<QString> visited;
     for (int hop = 0; hop < 5; ++hop) {
+        if (cancelled()) return {{}, {}, tr("Lookup cancelled.")};
         if (visited.contains(resolved))
             return {{}, {}, tr("The downloaded dictionary contains a redirect cycle."), true};
         visited.insert(resolved);
@@ -594,6 +624,7 @@ DictionaryResponse KaikkiOfflineStore::read_word(const QString &path, const QStr
                 return {{}, {}, tr("Could not read the downloaded dictionary index.")};
             int count = 0;
             while (statement.query.next()) {
+                if (cancelled()) return {{}, {}, tr("Lookup cancelled.")};
                 const auto payload = statement.query.value(0).toByteArray();
                 const auto *bytes = reinterpret_cast<const uchar *>(payload.constData());
                 const int size = payload.size();

@@ -17,43 +17,22 @@
 #include "ShoWThisConstants.h"
 #include "OverlayController.h"
 
-void register_host_app() {
-    // The Registry interface only exists for unsandboxed ("host") apps.
-    // Under Flatpak the app id is already known via .flatpak-info, and
-    // calling Register() there is unsupported/unnecessary.
-    if (QFile::exists(QStringLiteral("/.flatpak-info")))
-        return;
-    QDBusMessage call = QDBusMessage::createMethodCall(showthis::DESKTOP_PORTAL_SERVICE,
-                                                       showthis::DESKTOP_PORTAL_PATH,
-                                                       showthis::REGISTRY_IFACE,
-                                                       "Register");
-    call << showthis::APP_ID << QVariantMap{};
-
-    QDBusMessage reply = QDBusConnection::sessionBus().call(call);
-    if (reply.type() != QDBusMessage::ReplyMessage) {
-        // Not fatal on older xdg-desktop-portal (<1.20) where the
-        // interface doesn't exist yet, but on 1.21+ this means
-        // GlobalShortcuts::CreateSession will fail right after.
-        qWarning() << "Registry.Register failed:" << reply.errorMessage();
-    }
-}
-
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
     app.setOrganizationName(QStringLiteral("maslyna"));
     app.setOrganizationDomain(QStringLiteral("maslyna.dev"));
     app.setApplicationName(QStringLiteral("ShoWThis"));
+    app.setDesktopFileName(showthis::APP_ID);
     app.setQuitOnLastWindowClosed(false);
     showthis::AppSettings settings;
 
     QDBusConnection bus = QDBusConnection::sessionBus();
 
-    register_host_app();
-
     if (!bus.registerService(showthis::APP_ID)) {
-        qWarning("Failed to register the service's name. Probably, another "
-                 "instance is already running");
-        return -1;
+        auto activate = QDBusMessage::createMethodCall(showthis::APP_ID, "/dev/maslyna/ShoWThis",
+            "dev.maslyna.ShoWThis", "show_notebook");
+        bus.call(activate, QDBus::NoBlock);
+        return 0;
     }
 
     showthis::ocr::OcrEngine ocr_engine;
@@ -102,9 +81,22 @@ int main(int argc, char *argv[]) {
             ocr_engine.set_languages(language);
             return showthis::ScanResult{ocr_engine.scan_image(image), {}};
         });
+    controller.set_cancel_handler([&ocr_engine]() { ocr_engine.request_cancel(); });
+    bus.registerObject("/dev/maslyna/ShoWThis", "dev.maslyna.ShoWThis", &controller, QDBusConnection::ExportScriptableSlots);
 
     QSystemTrayIcon tray(QIcon::fromTheme("edit-find"));
     QMenu menu;
+    QAction *capture_action = menu.addAction("Capture screen");
+    QObject::connect(capture_action, &QAction::triggered, &controller, &showthis::OverlayController::toggle_overlay);
+    QAction *retry_action = menu.addAction("Retry shortcut setup");
+    QObject::connect(retry_action, &QAction::triggered, &portal, &showthis::GlobalShortcutPortal::start);
+    QObject::connect(&portal, &showthis::GlobalShortcutPortal::state_changed, &app, [&]() {
+        retry_action->setEnabled(!portal.ready());
+        if (!portal.error().isEmpty()) {
+            w.set_error(portal.error());
+            tray.showMessage("ShoWThis shortcut", portal.error(), QSystemTrayIcon::Warning);
+        }
+    });
     QAction *vocabulary_action = menu.addAction("My vocabulary");
     QObject::connect(vocabulary_action, &QAction::triggered,
         &controller, &showthis::OverlayController::show_notebook);
@@ -131,5 +123,7 @@ int main(int argc, char *argv[]) {
 
     w.show();
     w.setVisible(false);
+    if (!QSystemTrayIcon::isSystemTrayAvailable())
+        controller.show_notebook();
     return QApplication::exec();
 }

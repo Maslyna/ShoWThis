@@ -90,6 +90,8 @@ private slots:
         // A failed language change must leave the working engine usable.
         QVERIFY_EXCEPTION_THROWN(engine.set_languages("missing"), std::runtime_error);
         QVERIFY(engine.scan_image(blank).isEmpty());
+        engine.request_cancel();
+        QVERIFY_EXCEPTION_THROWN(engine.scan_image(blank), std::runtime_error);
     }
 };
 

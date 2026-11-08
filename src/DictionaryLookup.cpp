@@ -32,8 +32,31 @@ bool connection_failure(QNetworkReply::NetworkError error) {
 
 }  // namespace
 
-DictionaryLookup::DictionaryLookup(QNetworkAccessManager *network, QObject *parent, DictionaryProviders providers)
-    : QObject(parent), m_providers(std::move(providers)), m_network(network) {}
+DictionaryLookup::DictionaryLookup(QNetworkAccessManager *network, QObject *parent, DictionaryProviders providers,
+    const QString &directory)
+    : QObject(parent), m_providers(std::move(providers)), m_network(network) {
+    for (const auto &item : m_providers) {
+        item->initialize(network, directory);
+        if (item->state())
+            connect(item->state(), &DictionaryProviderState::data_changed, this, &DictionaryLookup::provider_data_changed);
+    }
+}
+
+QObject *DictionaryLookup::settings(const QString &id) const {
+    const auto *source = provider(id);
+    return source ? source->state() : nullptr;
+}
+
+QString DictionaryLookup::revision(const QString &language, const DictionaryOptions &options) const {
+    QJsonObject revisions;
+    for (const auto &target : options.targets) {
+        const auto *source = provider(target.provider);
+        const auto token = source ? source->revision(dictionary_language_code(language), target.language) : QString{};
+        if (!token.isEmpty()) revisions.insert(target.key(), token);
+    }
+    return revisions.isEmpty() ? QString{} : QString::fromLatin1(QCryptographicHash::hash(
+        QJsonDocument(revisions).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256).toHex());
+}
 
 DictionaryLookup::~DictionaryLookup() { cancel(); }
 
@@ -121,6 +144,8 @@ QString DictionaryLookup::cache_key(const QString &language, const QString &word
 }
 
 void DictionaryLookup::cancel() {
+    m_cancellation->store(true);
+    m_cancellation = std::make_shared<std::atomic_bool>(false);
     ++m_generation;
     const auto replies = m_replies;
     m_replies.clear();
@@ -227,7 +252,7 @@ bool DictionaryLookup::try_local(const DictionaryTarget &target, const QString &
     const auto key = target.key() + '\n' + word;
     if (m_local_attempted.contains(key))
         return false;
-    const auto job = provider(target.provider)->local_lookup(word, m_language, target.language);
+    const auto job = provider(target.provider)->local_lookup(word, m_language, target.language, m_cancellation);
     if (!job)
         return false;
     m_local_attempted.insert(key);

@@ -3,6 +3,7 @@
 #include <leptonica/allheaders.h>
 #include <tesseract/baseapi.h>
 #include <tesseract/resultiterator.h>
+#include <tesseract/ocrclass.h>
 
 #include <QImage>
 #include <QList>
@@ -20,7 +21,7 @@ void PixDeleter::operator()(PIX *pix) const noexcept {
 }
 
 OcrEngine::OcrEngine(OcrEngineConfig config)
-    : m_config{{}, config.data_path}, m_api(std::make_unique<tesseract::TessBaseAPI>()) {
+    : m_config{{}, config.data_path, qMax(1, config.timeout_ms)}, m_api(std::make_unique<tesseract::TessBaseAPI>()) {
     // Language discovery and notebook startup do not require a loaded model.
     if (!config.langs.isEmpty())
         set_languages(config.langs);
@@ -88,6 +89,8 @@ QRect OcrEngine::qrect_from_tesseract_coord(int x1, int y1, int x2, int y2) {
 }
 
 QList<WordBox> OcrEngine::scan_image(const QImage &img) {
+    if (m_cancelled.load())
+        throw std::runtime_error("OCR cancelled.");
     if (m_config.langs.isEmpty())
         throw std::runtime_error("No OCR language selected. Install Tesseract language data and choose an OCR language.");
     PixPtr pix = to_pix(img);
@@ -95,8 +98,12 @@ QList<WordBox> OcrEngine::scan_image(const QImage &img) {
 
     QList<WordBox> res;
 
-    if (m_api->Recognize(nullptr) != 0) {
-        throw std::runtime_error("OCR recognition failed.");
+    tesseract::ETEXT_DESC monitor;
+    monitor.cancel_this = &m_cancelled;
+    monitor.cancel = [](void *context, int) { return static_cast<std::atomic_bool *>(context)->load(); };
+    monitor.set_deadline_msecs(m_config.timeout_ms);
+    if (m_api->Recognize(&monitor) != 0) {
+        throw std::runtime_error(m_cancelled.load() ? "OCR cancelled." : "OCR failed or exceeded its time limit.");
     }
 
     std::unique_ptr<tesseract::ResultIterator> it(m_api->GetIterator());

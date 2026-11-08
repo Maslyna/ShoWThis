@@ -24,6 +24,7 @@ ColumnLayout {
             Layout.minimumWidth: 0
             selectByMouse: true
             Accessible.name: qsTr("Search recent lookups")
+            onTextChanged: page.service.history_model.filter = text
         }
         NotebookButton { text: qsTr("History settings"); onClicked: page.settings_requested() }
     }
@@ -45,10 +46,7 @@ ColumnLayout {
             anchors.fill: parent
             clip: true
             spacing: 2
-            model: page.service.dictionary_history.filter(function(item) {
-                return [item.word, item.context, item.summary || ""].join(" ")
-                    .toLowerCase().includes(search.text.toLowerCase())
-            })
+            model: page.service.history_model
             ScrollBar.vertical: ScrollBar {}
             NotebookEmpty {
                 anchors.fill: parent

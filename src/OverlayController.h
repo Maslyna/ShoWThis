@@ -31,8 +31,9 @@ public:
 public slots:
     void toggle_overlay();
     void hide_overlay();
-    void show_notebook();
+    Q_SCRIPTABLE void show_notebook();
     void wait_for_finished();
+    void set_cancel_handler(std::function<void()> handler) { m_cancel = std::move(handler); }
 
 private:
     void captured(const QImage &image);
@@ -43,6 +44,7 @@ private:
     ShoWSurface &m_surface;
     AScreenCaptureBackend &m_backend;
     Scanner m_scanner;
+    std::function<void()> m_cancel;
     QFutureWatcher<ScanResult> m_watcher;
     QImage m_screenshot;
     QString m_scan_language;

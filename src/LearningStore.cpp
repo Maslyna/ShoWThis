@@ -97,7 +97,7 @@ NotebookContents LearningStore::load(int history_limit) {
     if (!file.exists())
         return contents;
     QJsonParseError error;
-    const bool opened = file.open(QIODevice::ReadOnly);
+    const bool opened = file.size() <= 64 * 1024 * 1024 && file.open(QIODevice::ReadOnly);
     const auto document = opened ? QJsonDocument::fromJson(file.readAll(), &error) : QJsonDocument{};
     const auto object = document.object();
     if (!opened || error.error != QJsonParseError::NoError || !document.isObject()
@@ -179,7 +179,11 @@ bool LearningStore::save(const QVariantList &cards, const QJsonObject &cache, co
     object.insert("cards", card_array);
     object.insert("dictionary_cache", cache);
     object.insert("dictionary_history", QJsonArray::fromVariantList(history));
-    const auto bytes = QJsonDocument(object).toJson();
+    const auto bytes = QJsonDocument(object).toJson(QJsonDocument::Compact);
+    if (bytes.size() > 16 * 1024 * 1024) {
+        m_error = QObject::tr("Vocabulary exceeds the 16 MiB safety limit. No data was overwritten.");
+        return false;
+    }
     QSaveFile file(m_file_name);
     if (!QDir().mkpath(QFileInfo(m_file_name).absolutePath()) || !file.open(QIODevice::WriteOnly)
         || !file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)

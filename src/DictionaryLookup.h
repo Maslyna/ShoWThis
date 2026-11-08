@@ -15,18 +15,21 @@ class DictionaryLookup : public QObject {
     Q_OBJECT
 public:
     explicit DictionaryLookup(QNetworkAccessManager *network, QObject *parent = nullptr,
-                              DictionaryProviders providers = default_dictionary_providers());
+                              DictionaryProviders providers = default_dictionary_providers(), const QString &directory = {});
     ~DictionaryLookup() override;
     void lookup(const QString &word, const QString &language, const DictionaryOptions &options);
     void cancel();
     bool busy() const { return m_pending_words > 0; }
     QVariantList sources() const;
+    QObject *settings(const QString &id) const;
+    QString revision(const QString &language, const DictionaryOptions &options) const;
     bool configure(const QVariantList &selection, bool follow_forms, DictionaryOptions &options,
                    QVariantList &normalized, QString &error) const;
     static QString cache_key(const QString &language, const QString &word, const DictionaryOptions &options);
 
 signals:
     void finished(const QJsonObject &data, const QString &message, bool cacheable);
+    void provider_data_changed();
 
 private:
     using ResponseHandler = std::function<void(const QByteArray &, int, const QString &, QNetworkReply::NetworkError)>;
@@ -62,6 +65,7 @@ private:
     int m_pending_words = 0;
     bool m_starting = false;
     bool m_fallback_started = false;
+    LookupCancellation m_cancellation = std::make_shared<std::atomic_bool>(false);
 };
 
 }  // namespace showthis

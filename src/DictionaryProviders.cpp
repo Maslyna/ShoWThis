@@ -15,7 +15,8 @@ QVariantMap DictionaryProvider::metadata() const {
             preferred = system;
     }
     return {{"id", id()}, {"name", name()}, {"description", description()},
-        {"website", website().toString()}, {"languages", languages}, {"default_language", preferred}};
+        {"website", website().toString()}, {"languages", languages}, {"default_language", preferred},
+        {"settings", QVariant::fromValue(static_cast<QObject *>(state()))}, {"settings_component", settings_component()}};
 }
 
 DictionaryProviders default_dictionary_providers(KaikkiOfflineStore *offline) {

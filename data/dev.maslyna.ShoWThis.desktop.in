@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ShoWThis
+Comment=Learn words from your screen
+Exec=@CMAKE_INSTALL_FULL_BINDIR@/ShoWThis
+Icon=edit-find
+Terminal=false
+Categories=Education;Languages;
+StartupNotify=true
+X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2;

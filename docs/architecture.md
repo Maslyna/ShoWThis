@@ -39,6 +39,12 @@ for tests; the caller retains ownership of an injected service.
 - `DictionaryProvider` owns source metadata and the request/response protocol.
   Kaikki and FreeDictionaryAPI are registered in `DictionaryProviders.cpp`;
   neither the scheduler nor QML needs provider-name branches.
+  Providers initialize and own their optional local state, expose settings
+  component/state metadata, and calculate revisions for a selected word/definition
+  language pair. The scheduler subscribes to the generic state notifier and
+  supplies a shared cancellation token to local jobs. Kaikki's worker checks it
+  between redirect hops and result records. The legacy typed offline accessor
+  remains only for compatibility; `LearningService` no longer creates the store.
 - `DictionaryData` normalizes the providers' formats and explicit form-of links.
 - `KaikkiOfflineStore` manages opt-in gzip downloads, background SQLite indexing,
   word-language filtering, raw redirect records, atomic pack updates,
@@ -56,12 +62,22 @@ for tests; the caller retains ownership of an injected service.
   action is hidden until the selected provider is configured; personal and
   dictionary-supplied translations remain editable without a provider.
 - `LearningStore` owns JSON validation, legacy migrations, history trimming,
-  owner-only permissions, and atomic writes. Service state is committed only
-  after a successful save. Cards require unique non-empty IDs and non-empty
+  owner-only permissions, and atomic vocabulary writes. Vocabulary state is
+  committed only after a successful save. Cards require unique non-empty IDs and non-empty
   words; known optional fields are type-checked before migration or writing.
   A malformed card makes the notebook read-only rather than silently repairing
   or dropping data. Missing optional legacy fields and unknown metadata remain
   supported, including the null grammar profile written by older manual cards.
+- `LookupCacheStore` separately persists disposable history/results to an
+  owner-only sidecar. Snapshots are coalesced and serialized/written by a worker;
+  shutdown flushes the latest snapshot. Cache failures do not block vocabulary
+  saves, except when flushing is needed to safely migrate an embedded legacy
+  cache. Explicit history clearing/limit changes wait for successful persistence.
+  Limits are 16 MiB total and 1 MiB per result, in addition to the entry count.
+- `NotebookListModel` exposes typed identity/word roles with precomputed C++ search
+  text for vocabulary and history. QML no longer copies and filters full arrays
+  on every keystroke. `CardForms` centralizes validation in typed number-status
+  and article-origin structures; maps remain the legacy/extension boundary.
 - `NotebookData` provides dictionary parsing, language-code normalization, and
   the shared article/prefix formatter used by the UI and exports.
 - `AnkiExporter` formats cards and validates/writes exports without overwriting
@@ -71,6 +87,19 @@ Existing version-1 notebooks remain compatible. Unknown root and card fields,
 including metadata left by the removed analysis feature, are preserved during
 saves and edits but are not displayed or included in Anki exports. New cards do
 not create analysis metadata. Removing a card still removes the complete card.
+
+Vocabulary JSON saves are synchronous and capped at 16 MiB, but lookups never
+rewrite that file. Legacy input is capped at 64 MiB and cache input at 32 MiB
+before `readAll()`. Legacy embedded caches remain intact until a sidecar has
+been successfully written. Backups of the vocabulary alone retain personal
+cards, but not disposable lookup history.
+
+Opening saved cards/history applies a transient draft configuration rather than
+writing global defaults. A new draft restores persisted defaults; explicit
+choices on a new draft may update them. Cache keys use only selected providers'
+relevant data revisions. Online results expire after seven days, with an
+explicit Refresh action and stale-result fallback after failed refreshes.
+History opening uses its exact stored key and never silently starts networking.
 
 ## Optional translators
 
@@ -104,7 +133,7 @@ meaning and dictionary-supplied translation.
 
 ## Build and tests
 
-`showthis_core`, `showthis_ui`, and `showthis_ocr` are shared internal libraries
+`showthis_core`, `showthis_ui`, `showthis_ocr`, and `showthis_desktop` are internal libraries
 used by the app and tests. QML resources are initialized explicitly when linked
 from the static UI library.
 
@@ -128,4 +157,9 @@ errors; they do not download full editions.
 
 The overlay tests use Qt's offscreen/software backend. Actual compositor screen
 capture, global shortcuts, and live network services require manual integration
-testing; the automated tests use simulated capture and network replies.
+testing. `DesktopIntegrationTest` exercises actual private-D-Bus messages and
+Unix pipes without contacting the user's compositor. `NotebookArchitectureTest`
+covers cache limits, separate persistence, refresh/expiry, provider-scoped
+revisions, offline history, transient drafts, a 10,000-entry model, typed forms,
+and cooperative local-job cancellation. See [desktop-testing.md](desktop-testing.md)
+for the remaining manual KDE checks. CI also configures an ASan/UBSan build.

@@ -269,10 +269,11 @@ void LearningServiceTest::history_limit_and_recency() {
     QCOMPARE(service.dictionary_history()[1].toMap().value("word").toString(), QString("Haus"));
     QCOMPARE(service.vocabulary().size(), 1);
 
+    QVERIFY(service.flush_cache());
     showthis::LearningService reopened(nullptr, path);
     QCOMPARE(reopened.history_limit(), 2);
     QCOMPARE(reopened.dictionary_history()[0].toMap().value("word").toString(), QString("Buch"));
-    QFile file(path);
+    QFile file(service.cache_path());
     QVERIFY(file.open(QIODevice::ReadOnly));
     const auto stored = QJsonDocument::fromJson(file.readAll()).object();
     QCOMPARE(stored.value("dictionary_cache").toObject().size(), 2);

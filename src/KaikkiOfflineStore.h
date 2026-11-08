@@ -15,7 +15,7 @@
 
 namespace showthis {
 
-class KaikkiOfflineStore : public QObject {
+class KaikkiOfflineStore : public DictionaryProviderState {
     Q_OBJECT
     Q_PROPERTY(QVariantList editions READ editions CONSTANT)
     Q_PROPERTY(QVariantList packs READ packs NOTIFY changed)
@@ -38,9 +38,10 @@ public:
     double progress() const { return m_progress; }
     QString message() const { return m_message; }
     QString storage_path() const { return m_directory; }
-    QString cache_token() const;
+    QString cache_token(const QString &word_language = {}, const QString &edition = {}) const;
     Q_INVOKABLE QString normalize_word_language(const QString &language) const;
-    std::optional<Lookup> lookup(const QString &edition, const QString &word_language, const QString &word) const;
+    std::optional<Lookup> lookup(const QString &edition, const QString &word_language, const QString &word,
+        const LookupCancellation &cancellation = {}) const;
     Q_INVOKABLE void inspect(const QString &edition, const QString &word_language = {});
     Q_INVOKABLE void download(const QString &edition, const QString &word_language = {});
     Q_INVOKABLE void cancel();
@@ -49,7 +50,6 @@ public:
 
 signals:
     void changed();
-    void data_changed();
 
 private:
     struct Job {
@@ -73,7 +73,8 @@ private:
     void drain_download();
     void start_indexing();
     static ImportResult import_pack(const std::shared_ptr<Job> &job, const QString &destination);
-    static DictionaryResponse read_word(const QString &path, const QString &edition, const QString &language, const QString &word);
+    static DictionaryResponse read_word(const QString &path, const QString &edition, const QString &language, const QString &word,
+        const LookupCancellation &cancellation);
 
     QNetworkAccessManager *m_network;
     QString m_directory;

@@ -232,7 +232,7 @@ Pane {
                     onOpen_requested: function(entry) {
                         panel.request_card({word: entry.word, language: entry.language, context: entry.context,
                             dictionary_selection: entry.dictionary_selection,
-                            follow_forms: entry.follow_forms, from_history: true})
+                            follow_forms: entry.follow_forms, history_key: entry.key, from_history: true})
                     }
                     onSettings_requested: navigation.current_index = 3
                 }

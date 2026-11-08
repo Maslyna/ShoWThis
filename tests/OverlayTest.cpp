@@ -12,6 +12,8 @@
 #include <QJsonDocument>
 #include <QtTest>
 #include <QSemaphore>
+#include <QElapsedTimer>
+#include <QThread>
 #include <atomic>
 #include <stdexcept>
 
@@ -774,7 +776,7 @@ private slots:
         QTRY_VERIFY(download->isEnabled());
         QCOMPARE(network.requests.size(), 1); // Size inspection only; no data download.
         QVERIFY(QMetaObject::invokeMethod(download, "clicked"));
-        auto *dialog = surface.rootObject()->findChild<QObject *>("offline_download_confirmation");
+        auto *dialog = settings->findChild<QObject *>("offline_download_confirmation");
         QVERIFY(dialog);
         QTRY_VERIFY(dialog->property("visible").toBool());
         QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));
@@ -1562,6 +1564,30 @@ private slots:
         QVERIFY(surface.error().isEmpty());
         QCOMPARE(scans.load(), 2);
         controller.hide_overlay();
+    }
+
+    void shutdown_requests_cooperative_scan_cancellation() {
+        QTemporaryDir directory;
+        showthis::LearningService service(nullptr, directory.filePath("words.json"));
+        showthis::ShoWSurface surface(nullptr, &service);
+        TestCaptureBackend backend;
+        std::atomic_bool cancelled{false};
+        QSemaphore started;
+        showthis::OverlayController controller(surface, backend, [&](const QImage &, const QString &) {
+            started.release();
+            QElapsedTimer timer;
+            timer.start();
+            while (!cancelled.load() && timer.elapsed() < 5000) QThread::msleep(1);
+            return showthis::ScanResult{};
+        });
+        controller.set_cancel_handler([&]() { cancelled.store(true); });
+        controller.toggle_overlay();
+        QImage image(100, 100, QImage::Format_RGB32);
+        image.fill(Qt::white);
+        backend.complete(image);
+        QTRY_VERIFY(started.available() > 0);
+        controller.wait_for_finished();
+        QVERIFY(cancelled.load());
     }
 
     void word_outlines_checkbox() {

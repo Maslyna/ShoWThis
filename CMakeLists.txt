@@ -1,5 +1,15 @@
 cmake_minimum_required(VERSION 3.19)
 project(ShoWThis LANGUAGES CXX)
+include(GNUInstallDirs)
+option(SHOWTHIS_ENABLE_SANITIZERS "Enable address/undefined-behaviour sanitizers" OFF)
+if(SHOWTHIS_ENABLE_SANITIZERS)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address,undefined)
+    else()
+        message(FATAL_ERROR "SHOWTHIS_ENABLE_SANITIZERS requires GCC or Clang")
+    endif()
+endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,7 +31,10 @@ qt_add_library(showthis_core STATIC
     src/AppSettings.h src/AppSettings.cpp
     src/LearningService.h src/LearningService.cpp
     src/LearningStore.h src/LearningStore.cpp
+    src/LookupCacheStore.h src/LookupCacheStore.cpp
     src/NotebookData.h src/NotebookData.cpp
+    src/CardForms.h src/CardForms.cpp
+    src/NotebookListModel.h src/NotebookListModel.cpp
     src/GrammarProfile.h src/GrammarProfile.cpp
     ${SHOWTHIS_GRAMMAR_RESOURCES}
     src/DictionaryData.h src/DictionaryData.cpp
@@ -51,15 +64,18 @@ qt_add_library(showthis_ocr STATIC src/OcrEngine.h src/OcrEngine.cpp)
 target_include_directories(showthis_ocr PUBLIC src)
 target_link_libraries(showthis_ocr PUBLIC Qt6::Gui PkgConfig::TESSERACT PkgConfig::LEPTONICA)
 
+qt_add_library(showthis_desktop STATIC
+    src/KWinScreenCaptureBackend.h src/KWinScreenCaptureBackend.cpp
+    src/GlobalShortcutPortal.h src/GlobalShortcutPortal.cpp)
+target_link_libraries(showthis_desktop PUBLIC showthis_ui Qt6::DBus)
+
 qt_add_executable(ShoWThis
     WIN32 MACOSX_BUNDLE
     src/main.cpp
-    src/KWinScreenCaptureBackend.h src/KWinScreenCaptureBackend.cpp
-    src/GlobalShortcutPortal.h src/GlobalShortcutPortal.cpp
     src/ShoWThisConstants.h
 )
 target_link_libraries(ShoWThis PRIVATE
-    showthis_ui showthis_ocr Qt6::Widgets Qt6::DBus Qt6::OpenGL
+    showthis_ui showthis_ocr showthis_desktop Qt6::Widgets Qt6::DBus Qt6::OpenGL
     LayerShellQt::Interface
 )
 
@@ -74,6 +90,8 @@ qt_generate_deploy_app_script(
     NO_UNSUPPORTED_PLATFORM_ERROR
 )
 install(SCRIPT ${deploy_script})
+configure_file(data/dev.maslyna.ShoWThis.desktop.in dev.maslyna.ShoWThis.desktop @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/dev.maslyna.ShoWThis.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 
 include(CTest)
 if(BUILD_TESTING)
@@ -81,6 +99,15 @@ if(BUILD_TESTING)
     qt_add_executable(OcrEngineTest tests/OcrEngineTest.cpp)
     target_link_libraries(OcrEngineTest PRIVATE showthis_ocr Qt6::Test)
     add_test(NAME OcrEngineTest COMMAND OcrEngineTest)
+    qt_add_executable(NotebookArchitectureTest tests/NotebookArchitectureTest.cpp)
+    target_link_libraries(NotebookArchitectureTest PRIVATE showthis_core Qt6::Test)
+    add_test(NAME NotebookArchitectureTest COMMAND NotebookArchitectureTest)
+    find_program(DBUS_RUN_SESSION dbus-run-session)
+    if(DBUS_RUN_SESSION)
+        qt_add_executable(DesktopIntegrationTest tests/DesktopIntegrationTest.cpp)
+        target_link_libraries(DesktopIntegrationTest PRIVATE showthis_desktop Qt6::Test)
+        add_test(NAME DesktopIntegrationTest COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:DesktopIntegrationTest>)
+    endif()
 
     qt_add_executable(OverlayTest tests/OverlayTest.cpp)
     target_link_libraries(OverlayTest PRIVATE showthis_ui Qt6::Test)
@@ -112,4 +139,6 @@ if(BUILD_TESTING)
     qt_add_executable(KaikkiOfflineStoreTest tests/KaikkiOfflineStoreTest.cpp)
     target_link_libraries(KaikkiOfflineStoreTest PRIVATE showthis_core Qt6::Test)
     add_test(NAME KaikkiOfflineStoreTest COMMAND KaikkiOfflineStoreTest)
+    get_property(SHOWTHIS_TEST_NAMES DIRECTORY PROPERTY TESTS)
+    set_tests_properties(${SHOWTHIS_TEST_NAMES} PROPERTIES TIMEOUT 60)
 endif()

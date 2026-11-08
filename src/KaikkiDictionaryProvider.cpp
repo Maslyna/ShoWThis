@@ -4,8 +4,21 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QObject>
+#include <QStandardPaths>
 
 namespace showthis {
+
+void KaikkiDictionaryProvider::initialize(QNetworkAccessManager *network, const QString &directory) {
+    if (!m_offline) {
+        const auto root = directory.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) : directory;
+        m_owned_offline = std::make_unique<KaikkiOfflineStore>(network, root + "/kaikki");
+        m_offline = m_owned_offline.get();
+    }
+}
+
+QString KaikkiDictionaryProvider::revision(const QString &language, const QString &edition) const {
+    return m_offline ? m_offline->cache_token(language, edition) : QString{};
+}
 
 QString KaikkiDictionaryProvider::description() const {
     return QObject::tr("Wiktionary definitions in the languages you choose. Coverage varies by edition.");
@@ -22,8 +35,8 @@ DictionaryAccess KaikkiDictionaryProvider::access() const {
 }
 
 std::optional<LocalDictionaryLookup> KaikkiDictionaryProvider::local_lookup(const QString &word, const QString &word_language,
-    const QString &definition_language) const {
-    return m_offline ? m_offline->lookup(definition_language, word_language, word) : std::nullopt;
+    const QString &definition_language, const LookupCancellation &cancellation) const {
+    return m_offline ? m_offline->lookup(definition_language, word_language, word, cancellation) : std::nullopt;
 }
 
 QVariantList KaikkiDictionaryProvider::definition_languages() const {

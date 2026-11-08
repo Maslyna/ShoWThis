@@ -5,6 +5,7 @@
 #include <QStringList>
 #include <QList>
 #include <memory>
+#include <atomic>
 
 class Pix;
 class QImage;
@@ -26,6 +27,7 @@ struct WordBox {
 struct OcrEngineConfig {
     QString langs;
     QString data_path;
+    int timeout_ms = 15000;
 };
 
 struct PixDeleter {
@@ -47,10 +49,12 @@ public:
     QList<WordBox> scan_image(const QImage &img);
     QStringList available_languages() const;
     void set_languages(const QString &languages);
+    void request_cancel() noexcept { m_cancelled.store(true); }
 
 private:
     OcrEngineConfig m_config;
     std::unique_ptr<tesseract::TessBaseAPI> m_api;
+    std::atomic_bool m_cancelled{false};
 };
 
 }  // namespace ocr

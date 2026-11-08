@@ -33,12 +33,14 @@ ColumnLayout {
     function load(action) {
         loading = true
         const card = action.card || ({})
-        if (card.language || action.language) service.source_language = card.language || action.language
-        if (card.target_language) service.target_language = card.target_language
+        const configuration = {}
+        if (card.language || action.language) configuration.language = card.language || action.language
+        if (card.target_language) configuration.target_language = card.target_language
         const selection = card.dictionary_selection || action.dictionary_selection
         const forms = card.follow_forms !== undefined ? card.follow_forms : action.follow_forms
-        if (selection !== undefined)
-            service.configure_dictionaries(selection, forms !== undefined ? forms : service.follow_forms)
+        if (selection !== undefined) configuration.dictionary_selection = selection
+        if (forms !== undefined) configuration.follow_forms = forms
+        service.prepare_draft(configuration, !card.id && !action.from_history)
         service.clear()
         card_id = card.id || ""
         saved_source = card.source || ({})
@@ -54,7 +56,10 @@ ColumnLayout {
         scroll.contentItem.contentY = 0
         loading = false
         dirty = false
-        if (action.from_history) lookup()
+        if (action.from_history) {
+            lookup_attempted = true
+            service.lookup_history(action.history_key)
+        }
     }
     function reset_lookup() {
         service.clear()
@@ -67,10 +72,10 @@ ColumnLayout {
         card_form.translation = ""
         mark_dirty()
     }
-    function lookup() {
+    function lookup(refresh = false) {
         compact_page = 0
         lookup_attempted = true
-        service.lookup(word_input.text, context_input.text)
+        service.lookup(word_input.text, context_input.text, refresh)
     }
     function native_translation(sense): string {
         return (sense.translations || []).filter(function(item) {
@@ -174,6 +179,16 @@ ColumnLayout {
                             onClicked: editor.lookup()
                             ToolTip.visible: hovered
                             ToolTip.text: qsTr("Send only this word to the selected dictionaries · Enter")
+                        }
+                        NotebookButton {
+                            objectName: "refresh_dictionary"
+                            text: "↻"
+                            quiet: true
+                            enabled: !editor.busy && word_input.text.trim().length > 0
+                            Accessible.name: qsTr("Refresh dictionary lookup")
+                            onClicked: editor.lookup(true)
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("Fetch fresh results instead of using the lookup cache")
                         }
                     }
                     NotebookDictionaryOptions {
