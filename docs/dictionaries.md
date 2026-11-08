@@ -123,6 +123,69 @@ limits. Normalized results and saved cards retain per-sense Wiktionary URLs,
 provider identity, and licence information; Anki exports use the selected
 meaning's actual provider attribution.
 
+## Downloaded Kaikki editions
+
+In **Settings → Offline dictionaries**:
+
+1. Choose the **word language** and **definitions in** language, then **Check
+   size**. For example, **German → Русский definitions** means German words
+   explained in Russian; **English → Русский definitions** is a separate pack.
+2. Select **Download / update…** and confirm the transfer and disk-space warning.
+3. Enable Kaikki and the matching definition language in **Sources & languages…**.
+4. Choose how Kaikki uses its downloaded data:
+   - **When online lookup cannot connect**: try the online service first, then
+     downloaded data after a connection failure, timeout, rate limit, or server
+     failure. A normal online “entry not found” does not trigger this fallback.
+   - **Prefer downloaded data**: search the local index first; use online lookup
+     if the local entry is missing or unreadable.
+   - **Downloaded data only**: do not send Kaikki lookup requests, even if an
+     edition or word is missing. This avoids waiting for an online timeout.
+   - **Online only**: retain installed editions but do not query them.
+
+This is about internet access, whether wired or Wi-Fi—not specifically the
+presence of an Ethernet adapter. Other selected providers can still send online
+requests. For entirely local dictionary lookup, select only Kaikki and choose
+**Downloaded data only**. Translation remains a separate online operation.
+
+Each transfer is the full compressed raw Wiktextract edition, but the local
+index keeps only the chosen word language. **All word languages** can be selected
+explicitly to keep the complete edition and avoid downloading the same edition
+again for another word language. Existing all-language packs remain usable.
+The app uses the published
+`raw-wiktextract-data.jsonl.gz` files rather than deprecated postprocessed bulk
+files. Editions vary greatly in size; the English edition can require several
+GB to download and significantly more free disk space to install. The size
+check is only a HEAD request; no bulk download happens without confirmation.
+
+Downloads stream to temporary files. Gzip decompression and SQLite indexing run
+in a worker thread with bounded memory. Records are compressed individually;
+lookups use word-language/exact-word indexes with a Unicode case-insensitive
+fallback. There is no full dataset scan on each lookup. Downloaded entries use
+the same normalization, grammar profiles, form-following, and attribution as
+online entries, and results are marked **offline**.
+
+Raw Wiktextract files also contain `hard-redirect` records with `title` and
+`redirect` instead of `word` and `lang_code`. These are indexed as redirects,
+not rejected as invalid JSONL; redirect traversal is bounded and cycle-checked.
+Unknown valid non-entry objects are counted and skipped. Actual JSON syntax
+errors report the line number and byte offset, while missing coverage reports
+which word language had no entries. Both leave existing packs intact.
+
+The settings page shows progress, cancellation, installed sizes, and the storage
+directory (`kaikki/` beside the notebook by default). A new edition is published
+atomically only after the gzip stream, records, and index have been validated.
+Failed or cancelled updates leave the previous edition usable. Temporary
+downloads are removed after completion/cancellation; only the indexed database
+is retained. Removing an edition does not remove saved cards or lookup history.
+Installed revisions and access policy separate lookup cache keys so an update
+does not silently keep returning results from an older pack.
+
+Installation currently requires Qt SQL's **QSQLITE** driver and zlib. Safety
+limits are 32 GiB compressed per download, 128 GiB expanded per edition, and
+8 MiB per record/lookup response. Downloads are opt-in and are never scheduled
+automatically by looking up a word. Publisher URLs or schemas may change;
+installation errors are surfaced without replacing a working edition.
+
 ## Adding a dictionary source
 
 1. Implement `DictionaryProvider`: stable ID, name, description, website,
@@ -137,3 +200,7 @@ No picker or scheduler changes are needed. The UI lists registered providers and
 their languages automatically; configuration is validated atomically and capped
 at 32 source/language pairs. Tests inject a third provider with two languages to
 exercise this without adding another production network service.
+
+Providers with local datasets can additionally expose an access policy and a
+thread-safe local lookup job. The generic scheduler runs those jobs off the UI
+thread, ignores cancelled results, and applies the same form-following rules.

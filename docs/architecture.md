@@ -11,6 +11,11 @@ edited normally before lookup or saving.
   card suppresses dirty tracking; opening another card goes through the panel's
   unsaved-change confirmation.
 - `NotebookDictionary.qml` displays dictionary results.
+- Anki export uses Qt's standard `QFileDialog`, with native dialogs enabled.
+  `ShoWSurface` hides the layer-shell overlay and releases keyboard focus before
+  opening an unparented save dialog, then restores the unchanged notebook after
+  saving or cancelling. `OverlayController` prevents shortcuts or the tray from
+  reopening the overlay over the dialog. There is no custom file browser.
 - `NotebookDictionaryOptions.qml` shows a compact source summary and a staged
   Apply/Cancel picker. `NotebookDictionarySource.qml` renders each registered
   source's languages and fallback role from metadata.
@@ -35,6 +40,12 @@ for tests; the caller retains ownership of an injected service.
   Kaikki and FreeDictionaryAPI are registered in `DictionaryProviders.cpp`;
   neither the scheduler nor QML needs provider-name branches.
 - `DictionaryData` normalizes the providers' formats and explicit form-of links.
+- `KaikkiOfflineStore` manages opt-in gzip downloads, background SQLite indexing,
+  word-language filtering, raw redirect records, atomic pack updates,
+  cancellation, and removal. `NotebookOfflineDictionaries`
+  exposes download confirmation and local/online policy in Settings. Providers
+  can expose local lookup jobs; the generic scheduler runs them in workers and
+  falls back according to each provider's access policy.
 - `GrammarProfile` interprets normalized tags using bundled declarative profiles
   in `data/grammar-profiles.json`. Rules depend on word language and part of
   speech, never on the definition/translation language or dictionary provider.
@@ -95,6 +106,10 @@ cmake -S . -B build -DBUILD_TESTING=ON
 cmake --build build -j 4
 ctest --test-dir build --output-on-failure
 ```
+
+Offline Kaikki additionally uses Qt6 Sql, its QSQLITE driver plugin, and zlib.
+The offline tests use tiny generated gzip dictionaries and simulated network
+errors; they do not download full editions.
 
 The overlay tests use Qt's offscreen/software backend. Actual compositor screen
 capture, global shortcuts, and live network services require manual integration
