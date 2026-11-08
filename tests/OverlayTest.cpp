@@ -1,4 +1,7 @@
 #include <QQmlEngine>
+#include <QApplication>
+#include <QFileDialog>
+#include <QLineEdit>
 #include <QPalette>
 #include <QQuickItem>
 #include <QSignalSpy>
@@ -19,6 +22,7 @@
 #include "AScreenCaptureBackend.h"
 #include "TestNetwork.h"
 #include "DictionaryFixtures.h"
+#include "OfflineDictionaryFixtures.h"
 
 class TestCaptureBackend : public showthis::AScreenCaptureBackend {
 public:
@@ -615,6 +619,207 @@ private slots:
         }
         QVERIFY(QMetaObject::invokeMethod(panel, "open_word", Q_ARG(QString, QString("new")), Q_ARG(QString, QString{})));
         QCOMPARE(availability->property("text").toString(), QString{});
+        QCOMPARE(warnings.size(), 0);
+    }
+
+    void anki_export_uses_standard_dialog_data() {
+        QTest::addColumn<QSize>("size");
+        QTest::newRow("desktop") << QSize(1100, 800);
+        QTest::newRow("compact") << QSize(480, 640);
+    }
+
+    void anki_export_uses_standard_dialog() {
+        QFETCH(QSize, size);
+        QTemporaryDir directory;
+        const auto store_path = directory.filePath("words.json");
+        showthis::LearningService service(nullptr, store_path);
+        QVERIFY(service.save_word({}, "Haus", "", "house", "", "", -1));
+        const auto selected_id = service.vocabulary()[0].toMap().value("id").toString();
+        QVERIFY(service.save_word({}, "Baum", "", "tree", "", "", -1));
+        showthis::ShoWSurface surface(nullptr, &service);
+        TestCaptureBackend backend;
+        showthis::OverlayController controller(surface, backend,
+            [](const QImage &, const QString &) { return showthis::ScanResult{}; });
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
+        surface.resize(size);
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        auto *panel = find_item(surface.contentItem(), "learning_panel");
+        QVERIFY(panel);
+        QVERIFY(QMetaObject::invokeMethod(panel, "open_word", Q_ARG(QString, QString("draft")), Q_ARG(QString, QString("context"))));
+        auto *meaning = find_item(surface.contentItem(), "word_meaning");
+        QVERIFY(meaning);
+        meaning->setProperty("text", "Keep this unsaved draft");
+        QVERIFY(panel->property("dirty").toBool());
+        QVERIFY(QMetaObject::invokeMethod(panel, "open_vocabulary"));
+        auto *selection = find_item(surface.contentItem(), "select_saved_" + selected_id);
+        QTRY_VERIFY(selection || (selection = find_item(surface.contentItem(), "select_saved_" + selected_id)));
+        selection->setProperty("checked", true);
+        QVERIFY(QMetaObject::invokeMethod(selection, "clicked"));
+        auto *export_button = find_item(surface.contentItem(), "export_anki");
+        QVERIFY(export_button);
+        QVERIFY(QMetaObject::invokeMethod(export_button, "clicked"));
+        QVERIFY(!surface.isVisible());
+        QVERIFY(surface.export_dialog_open());
+        const auto find_dialog = []() -> QFileDialog * {
+            for (auto *widget : QApplication::topLevelWidgets()) {
+                if (auto *dialog = qobject_cast<QFileDialog *>(widget);
+                    dialog && dialog->objectName() == "anki_export_dialog" && dialog->isVisible())
+                    return dialog;
+            }
+            return nullptr;
+        };
+        QPointer<QFileDialog> dialog;
+        QTRY_VERIFY(dialog = find_dialog());
+        QCOMPARE(dialog->parentWidget(), nullptr);
+        QCOMPARE(dialog->acceptMode(), QFileDialog::AcceptSave);
+        QVERIFY(!dialog->testOption(QFileDialog::DontUseNativeDialog));
+        QCOMPARE(dialog->defaultSuffix(), QString("txt"));
+        controller.toggle_overlay();
+        controller.show_notebook();
+        QVERIFY(!surface.isVisible());
+        QCOMPARE(backend.capture_count, 0);
+        const auto destination = directory.filePath("chosen export.tsv");
+        dialog->setDirectory(directory.path());
+        auto *filename = dialog->findChild<QLineEdit *>("fileNameEdit");
+        QVERIFY(filename);
+        filename->selectAll();
+        QTest::keyClicks(filename, "chosen export.tsv");
+        QCOMPARE(dialog->selectedUrls().first().toLocalFile(), destination);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
+        QTRY_VERIFY(!surface.export_dialog_open());
+        QTRY_VERIFY(surface.isVisible());
+        QFile file(destination);
+        QVERIFY2(file.open(QIODevice::ReadOnly), qPrintable(service.message()));
+        const auto exported = file.readAll();
+        QVERIFY(exported.contains("Haus"));
+        QVERIFY(!exported.contains("Baum"));
+        QCOMPARE(meaning->property("text").toString(), QString("Keep this unsaved draft"));
+        QVERIFY(panel->property("dirty").toBool());
+        QVERIFY(QMetaObject::invokeMethod(export_button, "clicked"));
+        QTRY_VERIFY(dialog = find_dialog());
+        QVERIFY(!surface.isVisible());
+        const auto cancelled = directory.filePath("should-not-exist.txt");
+        dialog->setDirectory(directory.path());
+        filename = dialog->findChild<QLineEdit *>("fileNameEdit");
+        QVERIFY(filename);
+        filename->selectAll();
+        QTest::keyClicks(filename, "should-not-exist.txt");
+        QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));
+        QTRY_VERIFY(surface.isVisible());
+        QVERIFY(panel->isVisible());
+        QVERIFY(!QFileInfo::exists(cancelled));
+        QVERIFY(QMetaObject::invokeMethod(export_button, "clicked"));
+        QTRY_VERIFY(dialog = find_dialog());
+        controller.hide_overlay(); // A later explicit hide must beat automatic restoration.
+        QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));
+        QTRY_VERIFY(!surface.export_dialog_open());
+        QTest::qWait(20);
+        QVERIFY(!surface.isVisible());
+        QCOMPARE(warnings.size(), 0);
+    }
+
+    void offline_dictionary_settings_data() {
+        QTest::addColumn<QSize>("size");
+        QTest::newRow("desktop") << QSize(1100, 850);
+        QTest::newRow("compact") << QSize(480, 700);
+    }
+
+    void offline_dictionary_settings() {
+        QFETCH(QSize, size);
+        QTemporaryDir directory;
+        TestNetwork network;
+        const auto gzip = gzip_bytes(offline_dictionary_data());
+        network.responder = [gzip](const QNetworkRequest &) -> TestNetwork::Response {
+            return {gzip, 200, QNetworkReply::NoError, gzip.size()};
+        };
+        showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
+        showthis::ShoWSurface surface(nullptr, &service);
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
+        surface.resize(size);
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        auto *navigation = find_item(surface.contentItem(), "notebook_tabs");
+        auto *panel = find_item(surface.contentItem(), "learning_panel");
+        QVERIFY(navigation && panel);
+        // Open the notebook before navigating to its settings page.
+        QVERIFY(QMetaObject::invokeMethod(panel, "open_word", Q_ARG(QString, QString("Haus")), Q_ARG(QString, QString{})));
+        navigation->setProperty("current_index", 3);
+        auto *edition = find_item(surface.contentItem(), "offline_dictionary_edition");
+        auto *word_language = find_item(surface.contentItem(), "offline_dictionary_word_language");
+        auto *check = find_item(surface.contentItem(), "check_offline_dictionary_size");
+        auto *download = find_item(surface.contentItem(), "download_offline_dictionary");
+        auto *mode = find_item(surface.contentItem(), "offline_dictionary_mode");
+        auto *cancel = find_item(surface.contentItem(), "cancel_offline_dictionary");
+        auto *settings = find_item(surface.contentItem(), "offline_dictionary_settings");
+        QVERIFY(edition && word_language && check && download && mode && cancel && settings);
+        QVERIFY(network.requests.isEmpty());
+        QVERIFY(!download->isEnabled());
+        edition->setProperty("currentIndex", 1); // Russian definitions, not word language.
+        QVERIFY(word_language->property("count").toInt() > 2);
+        int german_index = 1;
+        for (const auto &option : service.language_options()) {
+            if (option.toMap().value("code").toString() == "de") break;
+            ++german_index;
+        }
+        word_language->setProperty("currentIndex", german_index);
+        QVERIFY(QMetaObject::invokeMethod(word_language, "activated", Q_ARG(int, german_index)));
+        QVERIFY(QMetaObject::invokeMethod(check, "clicked"));
+        QTRY_VERIFY(!service.offline_dictionaries()->busy());
+        QTRY_VERIFY(download->isEnabled());
+        QCOMPARE(network.requests.size(), 1); // Size inspection only; no data download.
+        QVERIFY(QMetaObject::invokeMethod(download, "clicked"));
+        auto *dialog = surface.rootObject()->findChild<QObject *>("offline_download_confirmation");
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));
+        QCOMPARE(network.requests.size(), 1);
+        QVERIFY(service.offline_dictionaries()->packs().isEmpty());
+        network.automatic = false;
+        QVERIFY(QMetaObject::invokeMethod(download, "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
+        QVERIFY(service.offline_dictionaries()->busy());
+        QVERIFY(QMetaObject::invokeMethod(cancel, "clicked"));
+        QVERIFY(!service.offline_dictionaries()->busy());
+        QVERIFY(service.offline_dictionaries()->packs().isEmpty());
+        network.automatic = true;
+        QVERIFY(QMetaObject::invokeMethod(download, "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
+        QTRY_VERIFY(!service.offline_dictionaries()->busy());
+        QCOMPARE(service.offline_dictionaries()->packs().size(), 1);
+        QCOMPARE(service.offline_dictionaries()->packs()[0].toMap().value("word_language").toString(), QString("de"));
+        QCOMPARE(service.offline_dictionaries()->packs()[0].toMap().value("records").toInt(), 2);
+        QTRY_VERIFY(find_item(surface.contentItem(), "remove_offline_dictionary_de_ru"));
+        mode->setProperty("currentIndex", 2);
+        QVERIFY(QMetaObject::invokeMethod(mode, "activated", Q_ARG(int, 2)));
+        QCOMPARE(service.offline_dictionaries()->mode(), QString("local_only"));
+        QTest::qWait(30);
+        QVERIFY(settings->width() > 200 && settings->width() <= size.width());
+        auto *scroll = find_item(surface.contentItem(), "notebook_settings_scroll");
+        QVERIFY(scroll);
+        auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
+        QVERIFY(flickable);
+        auto *content = flickable->property("contentItem").value<QQuickItem *>();
+        QVERIFY(content);
+        flickable->setProperty("contentY", settings->mapToItem(content, QPointF()).y());
+        if (qEnvironmentVariableIsSet("SHOWTHIS_TEST_SCREENSHOTS")) {
+            QTest::qWait(50);
+            QVERIFY(surface.grabWindow().save(qEnvironmentVariable("SHOWTHIS_TEST_SCREENSHOTS")
+                + "/offline-settings-" + QTest::currentDataTag() + ".png"));
+        }
+        QVERIFY(service.configure_dictionaries({dictionary_selection("kaikki", {"ru"})}, true));
+        service.set_source_language("de");
+        QVERIFY(QMetaObject::invokeMethod(panel, "open_word", Q_ARG(QString, QString("Haus")), Q_ARG(QString, QString{})));
+        const auto requests = network.requests.size();
+        auto *lookup = find_item(surface.contentItem(), "lookup_dictionary");
+        QVERIFY(lookup);
+        QVERIFY(QMetaObject::invokeMethod(lookup, "clicked"));
+        QTRY_VERIFY(!service.dictionary_busy());
+        QCOMPARE(service.senses().size(), 1);
+        QCOMPARE(network.requests.size(), requests);
+        QVERIFY(service.senses()[0].toMap().value("source").toMap().value("offline").toBool());
         QCOMPARE(warnings.size(), 0);
     }
 

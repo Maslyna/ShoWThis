@@ -17,8 +17,8 @@ OverlayController::OverlayController(ShoWSurface &surface, AScreenCaptureBackend
     connect(&m_backend, &AScreenCaptureBackend::capture_failed, this, &OverlayController::capture_failed);
     connect(&m_surface, &ShoWSurface::hide_requested, this, &OverlayController::hide_overlay);
     connect(&m_surface, &QWindow::visibleChanged, this, [this](bool visible) {
-        if (!visible)
-            m_wants_visible = false; // Also honor native/compositor-initiated hides.
+        // Also honor native hides and restoration after the standard save dialog.
+        m_wants_visible = visible;
     });
     connect(&m_watcher, &QFutureWatcherBase::finished, this, &OverlayController::scan_finished);
     connect(&m_surface, &ShoWSurface::selectedLanguageChanged, this, [this]() {
@@ -33,6 +33,10 @@ OverlayController::~OverlayController() {
 }
 
 void OverlayController::toggle_overlay() {
+    if (m_surface.export_dialog_open()) {
+        m_surface.raise_export_dialog();
+        return;
+    }
     if (m_wants_visible || m_surface.isVisible()) {
         hide_overlay();
         return;
@@ -52,10 +56,15 @@ void OverlayController::toggle_overlay() {
 
 void OverlayController::hide_overlay() {
     m_wants_visible = false;
+    m_surface.suppress_export_restore();
     m_surface.hide();
 }
 
 void OverlayController::show_notebook() {
+    if (m_surface.export_dialog_open()) {
+        m_surface.raise_export_dialog();
+        return;
+    }
     m_wants_visible = true;
     m_surface.show();
     QMetaObject::invokeMethod(m_surface.rootObject(), "open_vocabulary");

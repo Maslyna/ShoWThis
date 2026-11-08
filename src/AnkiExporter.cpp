@@ -94,7 +94,7 @@ AnkiExportResult AnkiExporter::write(const QUrl &destination, const QString &sto
     if (!file.open(QIODevice::WriteOnly)
         || !file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)
         || file.write(bytes) != bytes.size() || !file.commit())
-        return {false, QObject::tr("Could not write Anki export: %1").arg(path)};
+        return {false, QObject::tr("Could not write Anki export: %1\n%2").arg(path, file.errorString())};
     return {true, QObject::tr("Exported %1 words. In Anki, import this file using the Basic note type.").arg(count)};
 }
 

@@ -7,6 +7,7 @@
 #include <QNetworkReply>
 #include <QSet>
 #include <functional>
+#include <QFutureWatcher>
 
 namespace showthis {
 
@@ -33,7 +34,9 @@ private:
     void send(DictionaryRequest request, ResponseHandler handler);
     void fetch_word(const DictionaryTarget &target, const QString &word, int depth);
     void fetch_request(const DictionaryTarget &target, const QString &word, int depth,
-                       const DictionaryRequest &request, int stage = 0);
+                        const DictionaryRequest &request, int stage = 0);
+    bool try_local(const DictionaryTarget &target, const QString &word, int depth,
+                   bool allow_network, const QString &network_error = {});
     void consume(const DictionaryTarget &target, const QString &word, int depth, const QJsonObject &document);
     void fail_word(const DictionaryTarget &target, const QString &word, const QString &message, bool missing = false);
     void finish_word();
@@ -42,6 +45,10 @@ private:
     DictionaryProviders m_providers;
     QNetworkAccessManager *m_network;
     QSet<QNetworkReply *> m_replies;
+    QSet<QFutureWatcher<DictionaryResponse> *> m_local_jobs;
+    QSet<QString> m_local_attempted;
+    QSet<QString> m_unavailable_network;
+    QStringList m_notices;
     quint64 m_generation = 0;
     QString m_word;
     QString m_language;

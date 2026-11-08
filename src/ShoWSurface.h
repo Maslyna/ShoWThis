@@ -3,10 +3,13 @@
 
 #include <QImage>
 #include <QQuickView>
+#include <QPointer>
 #include <QStringList>
 #include <QVariantList>
 
 #include "OcrEngine.h"
+
+class QFileDialog;
 
 namespace showthis {
 
@@ -22,6 +25,7 @@ class ShoWSurface : public QQuickView {
     Q_PROPERTY(QString selectedLanguage READ language WRITE set_language NOTIFY selectedLanguageChanged)
     Q_PROPERTY(bool scanning READ scanning WRITE set_scanning NOTIFY scanningChanged)
     Q_PROPERTY(QString error READ error WRITE set_error NOTIFY errorChanged)
+    Q_PROPERTY(bool export_dialog_open READ export_dialog_open NOTIFY export_dialog_changed)
 
 public:
     // An injected service remains owned by the caller and must outlive the view.
@@ -42,6 +46,10 @@ public:
     QString language() const { return m_language; }
     bool scanning() const { return m_scanning; }
     QString error() const { return m_error; }
+    bool export_dialog_open() const { return !m_export_dialog.isNull(); }
+    Q_INVOKABLE void export_vocabulary(const QStringList &card_ids = {});
+    void raise_export_dialog();
+    void suppress_export_restore() { m_restore_after_export = false; }
 
 signals:
     void wordsChanged();
@@ -51,9 +59,13 @@ signals:
     void scanningChanged();
     void errorChanged();
     void hide_requested();
+    void export_dialog_changed();
 
 private:
     ScreenshotProvider *m_provider;
+    LearningService *m_learning = nullptr;
+    QPointer<QFileDialog> m_export_dialog;
+    bool m_restore_after_export = false;
     QVariantList m_words;
     QSize m_image_size;
     quint64 m_image_revision = 0;

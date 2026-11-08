@@ -414,6 +414,7 @@ Item {
     LearningPanel {
         id: learning_panel
         service: learning
+        onExport_requested: function(ids) { overlay.export_vocabulary(ids) }
         z: 3
         anchors.centerIn: parent
         width: Math.max(0, Math.min(1120, root.width - 32))

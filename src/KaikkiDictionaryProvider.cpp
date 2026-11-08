@@ -11,6 +11,21 @@ QString KaikkiDictionaryProvider::description() const {
     return QObject::tr("Wiktionary definitions in the languages you choose. Coverage varies by edition.");
 }
 
+DictionaryAccess KaikkiDictionaryProvider::access() const {
+    if (!m_offline || m_offline->mode() == "online_only")
+        return DictionaryAccess::NetworkOnly;
+    if (m_offline->mode() == "prefer_local")
+        return DictionaryAccess::LocalFirst;
+    if (m_offline->mode() == "local_only")
+        return DictionaryAccess::LocalOnly;
+    return DictionaryAccess::NetworkFirst;
+}
+
+std::optional<LocalDictionaryLookup> KaikkiDictionaryProvider::local_lookup(const QString &word, const QString &word_language,
+    const QString &definition_language) const {
+    return m_offline ? m_offline->lookup(definition_language, word_language, word) : std::nullopt;
+}
+
 QVariantList KaikkiDictionaryProvider::definition_languages() const {
     return {
         QVariantMap{{"code", "en"}, {"name", "English"}},

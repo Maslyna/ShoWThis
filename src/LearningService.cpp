@@ -4,6 +4,7 @@
 
 #include <QDateTime>
 #include <QJsonDocument>
+#include <QFileInfo>
 #include <QRegularExpression>
 #include <QUuid>
 #include <QSet>
@@ -23,11 +24,16 @@ QString single_article(const QVariantMap &sense) {
 LearningService::LearningService(QObject *parent, const QString &file_name,
                                  QNetworkAccessManager *network, DictionaryProviders providers)
     : QObject(parent), m_network(network ? network : new QNetworkAccessManager(this)),
-      m_dictionary(new DictionaryLookup(m_network, this, std::move(providers))),
+      m_offline(new KaikkiOfflineStore(m_network, file_name.isEmpty() ? QString{} : QFileInfo(file_name).absolutePath() + "/kaikki", this)),
+      m_dictionary(new DictionaryLookup(m_network, this, providers.empty() ? default_dictionary_providers(m_offline) : std::move(providers))),
       m_translator(new TranslationService(this, m_network)),
       m_store(file_name) {
     connect(m_translator, &TranslationService::error_occurred, this, &LearningService::set_message);
     connect(m_translator, &TranslationService::configuration_changed, this, [this]() { set_message({}); });
+    connect(m_offline, &KaikkiOfflineStore::data_changed, this, [this]() {
+        clear();
+        emit preferences_changed();
+    });
     connect(m_dictionary, &DictionaryLookup::finished, this,
         [this](const QJsonObject &data, const QString &message, bool cacheable) {
             display_dictionary(data);
@@ -214,6 +220,7 @@ void LearningService::lookup(const QString &word, const QString &context) {
         return;
     }
     m_lookup_context = context;
+    m_dictionary_options.data_revision = m_offline->cache_token();
     m_lookup_key = DictionaryLookup::cache_key(m_source_language, m_lookup_word, m_dictionary_options);
     if (m_cache.contains(m_lookup_key)) {
         const auto data = m_cache.value(m_lookup_key).toObject();

@@ -5,8 +5,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets DBus Gui OpenGL Quick Qml QuickControls2 QuickDialogs2 Concurrent Network)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets DBus Gui OpenGL Quick Qml QuickControls2 QuickDialogs2 Concurrent Network Sql)
 find_package(LayerShellQt REQUIRED)
+find_package(ZLIB REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(TESSERACT REQUIRED IMPORTED_TARGET tesseract)
 pkg_check_modules(LEPTONICA REQUIRED IMPORTED_TARGET lept)
@@ -28,13 +29,14 @@ qt_add_library(showthis_core STATIC
     src/DictionaryProvider.h src/DictionaryProviders.cpp
     src/FreeDictionaryProvider.h src/FreeDictionaryProvider.cpp
     src/KaikkiDictionaryProvider.h src/KaikkiDictionaryProvider.cpp
+    src/KaikkiOfflineStore.h src/KaikkiOfflineStore.cpp
     src/AnkiExporter.h src/AnkiExporter.cpp
     src/TranslationProvider.h src/TranslationProviders.cpp
     src/TranslationService.h src/TranslationService.cpp
     src/DeepLTranslator.h src/DeepLTranslator.cpp
 )
 target_include_directories(showthis_core PUBLIC src)
-target_link_libraries(showthis_core PUBLIC Qt6::Core Qt6::Network)
+target_link_libraries(showthis_core PUBLIC Qt6::Core Qt6::Network Qt6::Concurrent Qt6::Sql ZLIB::ZLIB)
 
 qt_add_resources(SHOWTHIS_QML_RESOURCES qml/overlay.qrc)
 qt_add_library(showthis_ui STATIC
@@ -43,7 +45,7 @@ qt_add_library(showthis_ui STATIC
     src/AScreenCaptureBackend.h src/AScreenCaptureBackend.cpp
     ${SHOWTHIS_QML_RESOURCES}
 )
-target_link_libraries(showthis_ui PUBLIC showthis_core Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Concurrent)
+target_link_libraries(showthis_ui PUBLIC showthis_core Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Concurrent Qt6::Widgets)
 
 qt_add_executable(ShoWThis
     WIN32 MACOSX_BUNDLE
@@ -99,4 +101,8 @@ if(BUILD_TESTING)
     qt_add_executable(DictionaryLookupTest tests/DictionaryLookupTest.cpp)
     target_link_libraries(DictionaryLookupTest PRIVATE showthis_core Qt6::Test)
     add_test(NAME DictionaryLookupTest COMMAND DictionaryLookupTest)
+
+    qt_add_executable(KaikkiOfflineStoreTest tests/KaikkiOfflineStoreTest.cpp)
+    target_link_libraries(KaikkiOfflineStoreTest PRIVATE showthis_core Qt6::Test)
+    add_test(NAME KaikkiOfflineStoreTest COMMAND KaikkiOfflineStoreTest)
 endif()

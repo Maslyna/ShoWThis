@@ -18,9 +18,9 @@ QVariantMap DictionaryProvider::metadata() const {
         {"website", website().toString()}, {"languages", languages}, {"default_language", preferred}};
 }
 
-DictionaryProviders default_dictionary_providers() {
+DictionaryProviders default_dictionary_providers(KaikkiOfflineStore *offline) {
     DictionaryProviders providers;
-    providers.push_back(std::make_unique<KaikkiDictionaryProvider>());
+    providers.push_back(std::make_unique<KaikkiDictionaryProvider>(offline));
     providers.push_back(std::make_unique<FreeDictionaryProvider>());
     return providers;
 }

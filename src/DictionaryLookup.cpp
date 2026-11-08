@@ -4,6 +4,7 @@
 #include <QCryptographicHash>
 #include <QJsonDocument>
 #include <algorithm>
+#include <QtConcurrentRun>
 
 namespace showthis {
 
@@ -87,7 +88,9 @@ QString DictionaryLookup::cache_key(const QString &language, const QString &word
     for (const auto &target : options.targets)
         targets.append(target.key() + (target.fallback ? ":fallback" : ":primary"));
     targets.sort();
-    const QJsonObject configuration{{"targets", QJsonArray::fromStringList(targets)}, {"forms", options.follow_forms}};
+    QJsonObject configuration{{"targets", QJsonArray::fromStringList(targets)}, {"forms", options.follow_forms}};
+    if (!options.data_revision.isEmpty())
+        configuration.insert("data_revision", options.data_revision);
     const auto digest = QCryptographicHash::hash(QJsonDocument(configuration).toJson(QJsonDocument::Compact),
         QCryptographicHash::Sha256).toHex();
     return language + ':' + word + '|' + QString::fromLatin1(digest);
@@ -101,6 +104,12 @@ void DictionaryLookup::cancel() {
         reply->disconnect(this);
         reply->abort();
         reply->deleteLater();
+    }
+    const auto jobs = m_local_jobs;
+    m_local_jobs.clear();
+    for (auto *job : jobs) {
+        job->disconnect(this);
+        job->deleteLater();
     }
     m_pending_words = 0;
 }
@@ -116,6 +125,9 @@ void DictionaryLookup::lookup(const QString &word, const QString &language, cons
     m_errors.clear();
     m_missing.clear();
     m_fallback_started = false;
+    m_local_attempted.clear();
+    m_unavailable_network.clear();
+    m_notices.clear();
     // Validate direct C++ callers as well as configurations originating in QML.
     for (const auto &target : options.targets) {
         const auto *source = provider(target.provider);
@@ -167,7 +179,54 @@ void DictionaryLookup::fetch_word(const DictionaryTarget &target, const QString 
         return;
     m_visited[key].insert(word);
     ++m_pending_words;
-    fetch_request(target, word, depth, provider(target.provider)->request(word, m_language, target.language));
+    const auto *source = provider(target.provider);
+    const auto access = source->access();
+    if ((access == DictionaryAccess::LocalFirst || access == DictionaryAccess::LocalOnly
+            || (access != DictionaryAccess::NetworkOnly && m_unavailable_network.contains(target.provider)))
+        && try_local(target, word, depth, access != DictionaryAccess::LocalOnly && !m_unavailable_network.contains(target.provider)))
+        return;
+    if (access == DictionaryAccess::LocalOnly) {
+        fail_word(target, word, tr("No downloaded dictionary for words in %1 with definitions in %2. Download it in Settings.")
+            .arg(m_language, target.language), true);
+        return;
+    }
+    fetch_request(target, word, depth, source->request(word, m_language, target.language));
+}
+
+bool DictionaryLookup::try_local(const DictionaryTarget &target, const QString &word, int depth,
+    bool allow_network, const QString &network_error) {
+    const auto key = target.key() + '\n' + word;
+    if (m_local_attempted.contains(key))
+        return false;
+    const auto job = provider(target.provider)->local_lookup(word, m_language, target.language);
+    if (!job)
+        return false;
+    m_local_attempted.insert(key);
+    const auto generation = m_generation;
+    auto *watcher = new QFutureWatcher<DictionaryResponse>(this);
+    m_local_jobs.insert(watcher);
+    connect(watcher, &QFutureWatcher<DictionaryResponse>::finished, this,
+        [this, watcher, target, word, depth, generation, allow_network, network_error]() {
+            m_local_jobs.remove(watcher);
+            const auto response = watcher->result();
+            watcher->deleteLater();
+            if (generation != m_generation)
+                return;
+            if (response.error.isEmpty() && !response.document.value("entries").toArray().isEmpty()) {
+                const auto notice = tr("%1: using downloaded data.").arg(provider(target.provider)->name());
+                if (!m_notices.contains(notice))
+                    m_notices.append(notice);
+                consume(target, word, depth, response.document);
+            } else if (allow_network) {
+                fetch_request(target, word, depth, provider(target.provider)->request(word, m_language, target.language));
+            } else {
+                const auto message = response.error.isEmpty() ? tr("No entry in the downloaded dictionary.") : response.error;
+                fail_word(target, word, network_error.isEmpty() ? message : network_error + " " + message,
+                    network_error.isEmpty() && response.missing);
+            }
+        });
+    watcher->setFuture(QtConcurrent::run(*job));
+    return true;
 }
 
 void DictionaryLookup::fetch_request(const DictionaryTarget &target, const QString &word, int depth,
@@ -181,6 +240,11 @@ void DictionaryLookup::fetch_request(const DictionaryTarget &target, const QStri
             const auto message = status == 404 ? tr("No dictionary entry found.")
                 : status == 429 ? tr("Dictionary rate limit reached. Please try again later.")
                 : status == 200 ? error : tr("Dictionary request failed (%1).").arg(status);
+            if (status == 0 || status == 408 || status == 429 || status >= 500) {
+                m_unavailable_network.insert(target.provider);
+                if (provider(target.provider)->access() != DictionaryAccess::NetworkOnly && try_local(target, word, depth, false, message))
+                    return;
+            }
             fail_word(target, word, message, status == 404);
             return;
         }
@@ -279,7 +343,9 @@ void DictionaryLookup::maybe_finish() {
     }
     if (m_options.targets.isEmpty())
         messages.append(tr("Select a dictionary source and at least one definition language."));
-    emit finished(result, messages.join('\n'), messages.isEmpty());
+    const bool cacheable = messages.isEmpty();
+    messages.append(m_notices);
+    emit finished(result, messages.join('\n'), cacheable);
 }
 
 }  // namespace showthis

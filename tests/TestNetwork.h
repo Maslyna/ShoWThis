@@ -10,11 +10,13 @@
 class TestReply : public QNetworkReply {
 public:
     TestReply(const QNetworkRequest &request, const QByteArray &data, int status,
-              bool automatic, QObject *parent)
-        : QNetworkReply(parent), m_data(data), m_status(status) {
+              bool automatic, QObject *parent, NetworkError network_error = NoError, qint64 declared_length = -1)
+        : QNetworkReply(parent), m_data(data), m_status(status), m_network_error(network_error) {
         setRequest(request);
         setUrl(request.url());
         setAttribute(QNetworkRequest::HttpStatusCodeAttribute, status);
+        if (declared_length >= 0)
+            setHeader(QNetworkRequest::ContentLengthHeader, declared_length);
         open(QIODevice::ReadOnly);
         if (automatic)
             QTimer::singleShot(0, this, [this]() { complete(); });
@@ -31,7 +33,9 @@ public:
     void complete() {
         if (isFinished())
             return;
-        if (m_status >= 400)
+        if (m_network_error != NoError)
+            setError(m_network_error, "test network failure");
+        else if (m_status >= 400)
             setError(QNetworkReply::ContentAccessDenied, "test HTTP failure");
         setFinished(true);
         emit readyRead();
@@ -55,6 +59,7 @@ protected:
 private:
     QByteArray m_data;
     int m_status;
+    NetworkError m_network_error;
     qint64 m_offset = 0;
 };
 
@@ -63,6 +68,8 @@ public:
     struct Response {
         QByteArray body;
         int status = 200;
+        QNetworkReply::NetworkError error = QNetworkReply::NoError;
+        qint64 length = -1;
     };
     QByteArray response;
     int status = 200;
@@ -78,7 +85,7 @@ protected:
         requests.append(request);
         payloads.append(outgoing_data ? outgoing_data->readAll() : QByteArray{});
         const auto result = responder ? responder(request) : Response{response, status};
-        last_reply = new TestReply(request, result.body, result.status, automatic, this);
+        last_reply = new TestReply(request, result.body, result.status, automatic, this, result.error, result.length);
         replies.append(last_reply);
         return last_reply;
     }

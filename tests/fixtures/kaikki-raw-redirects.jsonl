@@ -1,0 +1,9 @@
+{"title":"Алтын","redirect":"алтын","pos":"hard-redirect"}
+{"title":"Haus-redirect","redirect":"Haus","pos":"hard-redirect"}
+{"title":"cycle-a","redirect":"cycle-b","pos":"hard-redirect"}
+{"title":"cycle-b","redirect":"cycle-a","pos":"hard-redirect"}
+{"word":"Haus","lang_code":"de","pos":"noun","senses":[{"glosses":["дом"],"tags":["neuter"]}],"forms":[{"form":"Häuser","tags":["plural"]}]}
+{"word":"Häuser","lang_code":"de","pos":"noun","senses":[{"glosses":["plural of Haus"],"form_of":[{"word":"Haus"}],"tags":["plural","form-of"]}]}
+{"word":"house","lang_code":"en","pos":"noun","senses":[{"glosses":["дом"]}]}
+{"word":"maison","lang_code":"fr","pos":"noun","senses":[{"glosses":["дом"]}]}
+{"metadata":"unknown non-entry records are not malformed JSON"}

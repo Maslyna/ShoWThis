@@ -5,6 +5,7 @@ import QtQuick.Layouts
 ScrollView {
     id: settings_page
     required property var service
+    objectName: "notebook_settings_scroll"
     clip: true
     contentWidth: availableWidth
 
@@ -65,6 +66,10 @@ ScrollView {
         NotebookTranslatorSettings {
             translator: settings_page.service.translator
             Layout.fillWidth: true
+        }
+
+        NotebookOfflineDictionaries {
+            service: settings_page.service
         }
 
         NotebookSurface {

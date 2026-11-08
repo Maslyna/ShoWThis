@@ -5,6 +5,12 @@
 #include <QQmlEngine>
 #include <QQuickImageProvider>
 #include <QReadWriteLock>
+#include <QDir>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QSettings>
+#include <QStandardPaths>
+#include <QTimer>
 
 static void init_overlay_resources() {
     static const bool initialized = []() {
@@ -48,10 +54,68 @@ ShoWSurface::ShoWSurface(QWindow *parent, LearningService *learning)
         learning->setObjectName(QStringLiteral("learning_service"));
     }
     rootContext()->setContextProperty(QStringLiteral("learning"), learning);
+    m_learning = learning;
     setSource(QUrl(QStringLiteral("qrc:/qml/Overlay.qml")));
 }
 
-ShoWSurface::~ShoWSurface() = default;
+ShoWSurface::~ShoWSurface() {
+    if (m_export_dialog) {
+        m_export_dialog->disconnect(this);
+        delete m_export_dialog.data();
+    }
+}
+
+void ShoWSurface::export_vocabulary(const QStringList &card_ids) {
+    if (m_export_dialog) {
+        raise_export_dialog();
+        return;
+    }
+    QSettings settings;
+    auto directory = settings.value("learning/export_directory",
+        QStandardPaths::writableLocation(QStandardPaths::DownloadLocation)).toString();
+    if (!QFileInfo(directory).isDir())
+        directory = QDir::homePath();
+    // No transient parent: the layer-shell window must be hidden while the
+    // platform's standard file dialog is visible, including on Wayland.
+    auto *dialog = new QFileDialog(nullptr, tr("Export vocabulary for Anki"), directory,
+        tr("Anki text files (*.txt *.tsv)"));
+    dialog->setObjectName("anki_export_dialog");
+    dialog->setAcceptMode(QFileDialog::AcceptSave);
+    dialog->setFileMode(QFileDialog::AnyFile);
+    dialog->setDefaultSuffix("txt");
+    dialog->selectFile("showthis-anki.txt");
+    dialog->setWindowModality(Qt::ApplicationModal);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    m_export_dialog = dialog;
+    m_restore_after_export = isVisible();
+    emit export_dialog_changed();
+    hide(); // Release the overlay layer and its exclusive keyboard grab first.
+    connect(dialog, &QFileDialog::finished, this, [this, dialog, card_ids](int result) {
+        if (result == QDialog::Accepted && !dialog->selectedUrls().isEmpty()) {
+            const auto destination = dialog->selectedUrls().first();
+            if (m_learning->export_anki(destination, card_ids) && destination.isLocalFile())
+                QSettings{}.setValue("learning/export_directory", QFileInfo(destination.toLocalFile()).absolutePath());
+        }
+        m_export_dialog.clear();
+        emit export_dialog_changed();
+        QTimer::singleShot(0, this, [this]() {
+            if (m_restore_after_export && !m_export_dialog) {
+                m_restore_after_export = false;
+                show();
+                requestActivate();
+            }
+        });
+    });
+    // Let the compositor process the hide before mapping the standard dialog.
+    QTimer::singleShot(0, dialog, [dialog]() { dialog->show(); });
+}
+
+void ShoWSurface::raise_export_dialog() {
+    if (m_export_dialog) {
+        m_export_dialog->raise();
+        m_export_dialog->activateWindow();
+    }
+}
 
 void ShoWSurface::set_image(const QImage &image, const QList<ocr::WordBox> &words) {
     m_provider->set_image(image);

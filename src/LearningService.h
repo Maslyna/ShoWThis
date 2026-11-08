@@ -7,6 +7,7 @@
 #include <QUrl>
 #include "LearningStore.h"
 #include "DictionaryLookup.h"
+#include "KaikkiOfflineStore.h"
 #include "TranslationService.h"
 
 namespace showthis {
@@ -29,11 +30,12 @@ class LearningService : public QObject {
     Q_PROPERTY(QVariantList dictionary_sources READ dictionary_sources CONSTANT)
     Q_PROPERTY(QVariantList dictionary_selection READ dictionary_selection NOTIFY preferences_changed)
     Q_PROPERTY(bool follow_forms READ follow_forms NOTIFY preferences_changed)
+    Q_PROPERTY(KaikkiOfflineStore *offline_dictionaries READ offline_dictionaries CONSTANT)
 
 public:
     explicit LearningService(QObject *parent = nullptr, const QString &file_name = {},
                               QNetworkAccessManager *network = nullptr,
-                              DictionaryProviders providers = default_dictionary_providers());
+                              DictionaryProviders providers = {});
     QVariantList senses() const { return m_senses; }
     QVariantMap source() const { return m_source; }
     TranslationService *translator() const { return m_translator; }
@@ -50,6 +52,7 @@ public:
     QVariantList dictionary_sources() const { return m_dictionary->sources(); }
     QVariantList dictionary_selection() const { return m_dictionary_selection; }
     bool follow_forms() const { return m_dictionary_options.follow_forms; }
+    KaikkiOfflineStore *offline_dictionaries() const { return m_offline; }
     Q_INVOKABLE bool configure_dictionaries(const QVariantList &selection, bool follow_forms);
     void set_source_language(const QString &language);
     void set_target_language(const QString &language);
@@ -82,6 +85,7 @@ private:
     void remember_lookup(const QString &key, const QString &context, const QJsonObject &data);
     void display_dictionary(const QJsonObject &data);
     QNetworkAccessManager *m_network;
+    KaikkiOfflineStore *m_offline;
     DictionaryLookup *m_dictionary;
     TranslationService *m_translator;
     QSettings m_settings;

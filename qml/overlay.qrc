@@ -8,6 +8,7 @@
         <file>NotebookConfirm.qml</file>
         <file>NotebookWordRow.qml</file>
         <file>NotebookSettings.qml</file>
+        <file>NotebookOfflineDictionaries.qml</file>
         <file>NotebookTranslatorSettings.qml</file>
         <file>NotebookLanguagePicker.qml</file>
         <file>NotebookWordEditor.qml</file>

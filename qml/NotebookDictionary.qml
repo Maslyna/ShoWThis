@@ -69,6 +69,7 @@ NotebookSurface {
                             text: ((row.modelData.source || {}).name || row.modelData.provider)
                                 + " · " + (row.modelData.definition_language || "").toUpperCase()
                                 + " · " + (row.modelData.headword || dictionary.word)
+                                + ((row.modelData.source || {}).offline ? qsTr(" · offline") : "")
                             textFormat: Text.PlainText
                             font.pixelSize: 10
                             opacity: 0.65

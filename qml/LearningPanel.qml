@@ -1,11 +1,11 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Dialogs as NativeDialogs
 
 Pane {
     id: panel
     required property var service
+    signal export_requested(var ids)
     property var export_ids: []
     property var pending_action: ({})
     property alias card_id: word_editor.card_id
@@ -58,7 +58,7 @@ Pane {
     }
     function begin_export(ids) {
         export_ids = ids.slice()
-        export_dialog.open()
+        export_requested(export_ids)
     }
 
     Shortcut {
@@ -272,13 +272,5 @@ Pane {
                 panel.open_word("", "")
             }
         }
-    }
-    NativeDialogs.FileDialog {
-        id: export_dialog
-        title: qsTr("Export vocabulary for Anki")
-        fileMode: NativeDialogs.FileDialog.SaveFile
-        nameFilters: [qsTr("Anki text files (*.txt *.tsv)")]
-        defaultSuffix: "txt"
-        onAccepted: panel.service.export_anki(selectedFile, panel.export_ids)
     }
 }
