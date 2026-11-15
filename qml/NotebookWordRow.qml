@@ -16,7 +16,7 @@ ItemDelegate {
     padding: 14
     implicitHeight: Math.max(86, contentItem.implicitHeight + topPadding + bottomPadding)
     onClicked: open_requested()
-    Accessible.name: display_word + ", " + (entry.translation || entry.meaning || entry.summary || "")
+    Accessible.name: display_word + ", " + (entry.translation || entry.meaning || entry.context_translation || entry.summary || "")
     background: Rectangle {
         radius: 7
         color: row.selected ? Qt.alpha(row.palette.highlight, 0.12)
@@ -51,7 +51,7 @@ ItemDelegate {
                 }
             }
             Label {
-                text: row.entry.translation || row.entry.meaning || row.entry.summary || qsTr("Cached dictionary entry")
+                text: row.entry.translation || row.entry.meaning || row.entry.context_translation || row.entry.summary || qsTr("Cached dictionary entry")
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
                 Layout.fillWidth: true

@@ -26,7 +26,7 @@ void NotebookListModel::replace(const QVariantList &entries) {
     for (const auto &value : entries) {
         const auto fields = value.toMap();
         QStringList search;
-        for (const auto *field : {"word", "meaning", "translation", "context", "notes", "summary"})
+        for (const auto *field : {"word", "meaning", "translation", "context", "context_translation", "notes", "summary"})
             search.append(fields.value(field).toString());
         Entry entry{fields.value("id").toString(), fields.value("word").toString(), search.join(' ').toCaseFolded(), fields};
         m_ids.insert(entry.id);

@@ -28,12 +28,13 @@ private slots:
         add_cards("blank-id", {QJsonObject{{"id", " "}, {"word", "Haus"}}});
         add_cards("missing-word", {QJsonObject{{"id", "saved"}}});
         add_cards("duplicate-ids", {valid, valid});
-        for (const auto *field : {"word", "meaning", "translation", "language", "article", "plural_status"}) {
+        for (const auto *field : {"word", "meaning", "translation", "context_translation", "language", "article", "plural_status"}) {
             auto card = valid;
             card.insert(field, 42);
             add_cards(qPrintable(QString("invalid-%1").arg(field)), {card});
         }
         add_cards("invalid-plural-list", {QJsonObject{{"id", "saved"}, {"word", "Haus"}, {"plural_forms", "Häuser"}}});
+        add_cards("null-context-translation", {QJsonObject{{"id", "saved"}, {"word", "Haus"}, {"context_translation", QJsonValue::Null}}});
         add_cards("invalid-plural-item", {QJsonObject{{"id", "saved"}, {"word", "Haus"}, {"plural_forms", QJsonArray{42}}}});
         add_cards("invalid-sense", {QJsonObject{{"id", "saved"}, {"word", "Haus"}, {"sense", QJsonArray{}}}});
         add_cards("invalid-source", {QJsonObject{{"id", "saved"}, {"word", "Haus"}, {"source", "source"}}});
@@ -77,6 +78,7 @@ private slots:
         QCOMPARE(contents.cache.size(), 1);
         QCOMPARE(contents.cards[0].toMap().value("article").toString(), QString("das"));
         QCOMPARE(contents.cards[0].toMap().value("custom").toString(), QString("keep"));
+        QVERIFY(!contents.cards[0].toMap().contains("context_translation"));
         QVERIFY(file.open(QIODevice::ReadOnly));
         const auto saved = QJsonDocument::fromJson(file.readAll()).object();
         QCOMPARE(saved.value("custom").toString(), QString("root metadata"));
@@ -87,7 +89,8 @@ private slots:
         QTemporaryDir directory;
         const auto path = directory.filePath("words.json");
         showthis::LearningStore store(path);
-        const QVariantMap card{{"id", "saved"}, {"word", "Haus"}, {"custom", QVariantList{42, "keep"}}};
+        const QVariantMap card{{"id", "saved"}, {"word", "Haus"}, {"context", "Das Haus"},
+            {"context_translation", "The house"}, {"custom", QVariantList{42, "keep"}}};
         QVERIFY(store.save({card}, {}, {}));
         QFile file(path);
         QVERIFY(file.open(QIODevice::ReadOnly));
@@ -98,10 +101,18 @@ private slots:
         QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(file.readAll(), original);
         file.close();
+        auto invalid = card;
+        invalid.insert("context_translation", QVariantList{"not a string"});
+        QVERIFY(!store.save({invalid}, {}, {}));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), original);
+        file.close();
         QVERIFY(store.save({card}, {}, {}));
         QVERIFY(store.error().isEmpty());
         const auto loaded = store.load(1000);
         QCOMPARE(loaded.cards[0].toMap().value("custom").toList(), card.value("custom").toList());
+        QCOMPARE(loaded.cards[0].toMap().value("context").toString(), QString("Das Haus"));
+        QCOMPARE(loaded.cards[0].toMap().value("context_translation").toString(), QString("The house"));
     }
 
     void legacy_null_grammar_profile_is_accepted() {

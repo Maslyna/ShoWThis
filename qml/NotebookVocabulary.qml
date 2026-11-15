@@ -36,7 +36,7 @@ ColumnLayout {
             objectName: "vocabulary_search"
             Layout.fillWidth: true
             Layout.minimumWidth: 0
-            placeholderText: qsTr("Search words, meanings, or sentences…")
+            placeholderText: qsTr("Search words, meanings, translations, or context…")
             selectByMouse: true
             Accessible.name: qsTr("Search saved vocabulary")
             onTextChanged: page.service.vocabulary_model.filter = text

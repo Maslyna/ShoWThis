@@ -1,5 +1,6 @@
 #include "ShoWSurface.h"
 #include "LearningService.h"
+#include "NotebookData.h"
 
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -11,6 +12,9 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QQuickItem>
 
 static void init_overlay_resources() {
     static const bool initialized = []() {
@@ -55,7 +59,18 @@ ShoWSurface::ShoWSurface(QWindow *parent, LearningService *learning)
     }
     rootContext()->setContextProperty(QStringLiteral("learning"), learning);
     m_learning = learning;
+    QSettings settings;
+    m_translator_source_language = settings.value("translator_window/source_language", learning->source_language()).toString();
+    m_translator_target_language = settings.value("translator_window/target_language", learning->target_language()).toString();
     setSource(QUrl(QStringLiteral("qrc:/qml/Overlay.qml")));
+    if (rootObject()) {
+        m_notebook_dialog = rootObject()->findChild<QQuickItem *>(QStringLiteral("notebook_dialog"));
+        m_translator_dialog = rootObject()->findChild<QQuickItem *>(QStringLiteral("translator_dialog"));
+    }
+    connect(this, &QWindow::visibleChanged, this, [this](bool visible) {
+        if (!visible)
+            cancel_context_selection();
+    });
 }
 
 ShoWSurface::~ShoWSurface() {
@@ -63,6 +78,121 @@ ShoWSurface::~ShoWSurface() {
         m_export_dialog->disconnect(this);
         delete m_export_dialog.data();
     }
+}
+
+void ShoWSurface::open_notebook_word(const QString &word, const QString &context) {
+    if (m_export_dialog) {
+        raise_export_dialog();
+        return;
+    }
+    cancel_context_selection();
+    if (QMetaObject::invokeMethod(rootObject(), "show_notebook_word",
+                                 Q_ARG(QVariant, word), Q_ARG(QVariant, context))) {
+        show();
+        requestActivate();
+    }
+}
+
+void ShoWSurface::open_notebook() {
+    if (m_export_dialog) {
+        raise_export_dialog();
+        return;
+    }
+    cancel_context_selection();
+    if (QMetaObject::invokeMethod(rootObject(), "show_notebook")) {
+        show();
+        requestActivate();
+    }
+}
+
+void ShoWSurface::close_notebook() {
+    QMetaObject::invokeMethod(rootObject(), "hide_notebook");
+}
+
+void ShoWSurface::open_translator(const QString &text, const QString &source_language, const QString &field) {
+    if (m_export_dialog) {
+        raise_export_dialog();
+        return;
+    }
+    cancel_context_selection();
+    if (QMetaObject::invokeMethod(rootObject(), "show_translator", Q_ARG(QVariant, text),
+                                 Q_ARG(QVariant, source_language), Q_ARG(QVariant, field))) {
+        show();
+        requestActivate();
+    }
+}
+
+void ShoWSurface::set_translator_source_language(const QString &language) {
+    const auto normalized = normalized_language_code(language);
+    if (normalized.isEmpty() || m_translator_source_language == normalized)
+        return;
+    m_learning->translator()->clear_session();
+    m_translator_source_language = normalized;
+    QSettings{}.setValue("translator_window/source_language", normalized);
+    emit translator_languages_changed();
+}
+
+void ShoWSurface::set_translator_target_language(const QString &language) {
+    const auto normalized = normalized_language_code(language);
+    if (normalized.isEmpty() || m_translator_target_language == normalized)
+        return;
+    m_learning->translator()->clear_session();
+    m_translator_target_language = normalized;
+    QSettings{}.setValue("translator_window/target_language", normalized);
+    emit translator_languages_changed();
+}
+
+void ShoWSurface::update_selected_card(const QString &id, const QString &word) {
+    if (id == m_selected_card_id && word == m_selected_card_word)
+        return;
+    m_selected_card_id = id;
+    m_selected_card_word = word;
+    emit selected_card_changed();
+}
+
+bool ShoWSurface::add_to_selected_card(const QString &field, const QString &text, const QString &target_language) {
+    if (!has_selected_card() || text.trimmed().isEmpty()
+        || (field != "translation" && field != "context_translation" && field != "meaning"
+            && field != "notes" && field != "context"))
+        return false;
+    QVariant added;
+    const bool translated = field == "translation" || field == "context_translation";
+    return QMetaObject::invokeMethod(m_notebook_dialog, "add_to_card",
+        Q_RETURN_ARG(QVariant, added), Q_ARG(QVariant, field), Q_ARG(QVariant, text),
+        Q_ARG(QVariant, translated ? target_language : QString{})) && added.toBool();
+}
+
+void ShoWSurface::begin_context_selection() {
+    if (m_export_dialog || !m_notebook_dialog || scanning() || m_image_size.isEmpty()
+        || m_words.isEmpty() || m_context_selection_active)
+        return;
+    m_context_selection_active = true;
+    if (!QMetaObject::invokeMethod(rootObject(), "begin_context_selection"))
+        m_context_selection_active = false;
+    if (m_context_selection_active) {
+        show();
+        requestActivate();
+    }
+}
+
+void ShoWSurface::complete_context_selection(const QString &text) {
+    if (!m_context_selection_active)
+        return;
+    m_context_selection_active = false;
+    QMetaObject::invokeMethod(rootObject(), "finish_context_selection",
+                             Q_ARG(QVariant, text), Q_ARG(QVariant, true));
+}
+
+void ShoWSurface::cancel_context_selection() {
+    if (!m_context_selection_active)
+        return;
+    m_context_selection_active = false;
+    QMetaObject::invokeMethod(rootObject(), "finish_context_selection",
+                             Q_ARG(QVariant, QString{}), Q_ARG(QVariant, false));
+}
+
+void ShoWSurface::copy_text(const QString &text) {
+    QGuiApplication::clipboard()->setText(text, QClipboard::Clipboard);
 }
 
 void ShoWSurface::export_vocabulary(const QStringList &card_ids) {
@@ -75,8 +205,6 @@ void ShoWSurface::export_vocabulary(const QStringList &card_ids) {
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation)).toString();
     if (!QFileInfo(directory).isDir())
         directory = QDir::homePath();
-    // No transient parent: the layer-shell window must be hidden while the
-    // platform's standard file dialog is visible, including on Wayland.
     auto *dialog = new QFileDialog(nullptr, tr("Export vocabulary for Anki"), directory,
         tr("Anki text files (*.txt *.tsv)"));
     dialog->setObjectName("anki_export_dialog");
@@ -118,6 +246,7 @@ void ShoWSurface::raise_export_dialog() {
 }
 
 void ShoWSurface::set_image(const QImage &image, const QList<ocr::WordBox> &words) {
+    cancel_context_selection();
     m_provider->set_image(image);
     m_image_size = image.size();
     ++m_image_revision;
@@ -130,6 +259,7 @@ QUrl ShoWSurface::image_source() const {
 }
 
 void ShoWSurface::set_words(const QList<ocr::WordBox> &words) {
+    cancel_context_selection();
     m_words.clear();
     m_words.reserve(words.size());
     for (const auto &word : words) {
@@ -185,6 +315,8 @@ void ShoWSurface::set_language(const QString &language) {
 void ShoWSurface::set_scanning(bool scanning) {
     if (m_scanning == scanning)
         return;
+    if (scanning)
+        cancel_context_selection();
     m_scanning = scanning;
     emit scanningChanged();
 }

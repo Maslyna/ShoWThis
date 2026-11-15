@@ -10,58 +10,9 @@ ScrollView {
     contentWidth: availableWidth
 
     ColumnLayout {
-        width: parent.width
+        width: Math.min(settings_page.availableWidth, 1040)
+        x: (settings_page.availableWidth - width) / 2
         spacing: 16
-
-        NotebookSurface {
-            Layout.fillWidth: true
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 12
-                Label { text: qsTr("Lookup history"); font.pixelSize: 17; font.bold: true }
-                Label {
-                    text: qsTr("Keep recent dictionary results for quick, offline access. Saved words are never removed by this limit.")
-                    opacity: 0.65
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    SpinBox {
-                        id: history_limit_input
-                        objectName: "history_limit"
-                        from: 0
-                        to: 10000
-                        stepSize: 100
-                        editable: true
-                        value: settings_page.service.history_limit
-                        Accessible.name: qsTr("Maximum history entries")
-                        Layout.fillWidth: true
-                    }
-                    NotebookButton {
-                        objectName: "apply_history_limit"
-                        text: qsTr("Apply limit")
-                        onClicked: settings_page.service.history_limit = history_limit_input.value
-                    }
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label {
-                        text: qsTr("0 disables history. Reducing the limit removes older entries.")
-                        opacity: 0.65
-                        font.pixelSize: 12
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                    NotebookButton {
-                        objectName: "clear_history"
-                        text: qsTr("Clear history…")
-                        quiet: true
-                        onClicked: history_confirmation.open()
-                    }
-                }
-            }
-        }
 
         NotebookTranslatorSettings {
             translator: settings_page.service.translator
@@ -85,14 +36,66 @@ ScrollView {
             Layout.fillWidth: true
             ColumnLayout {
                 anchors.fill: parent
-                spacing: 10
-                Label { text: qsTr("Your data stays here"); font.pixelSize: 17; font.bold: true }
+                spacing: 12
+                Label { text: qsTr("Lookup history & cache"); font.pixelSize: 17; font.bold: true }
                 Label {
-                    text: qsTr("Back up the vocabulary file to keep your saved words and notes. Recent lookups use a separate disposable cache. Both files are local, but not encrypted.")
+                    text: qsTr("Recent dictionary results are cached for offline access. This limit never removes saved word cards.")
                     opacity: 0.65
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
+                RowLayout {
+                    Layout.fillWidth: true
+                    SpinBox {
+                        id: history_limit_input
+                        objectName: "history_limit"
+                        from: 0
+                        to: 10000
+                        stepSize: 100
+                        editable: true
+                        value: settings_page.service.history_limit
+                        Accessible.name: qsTr("Maximum history entries")
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                    }
+                    NotebookButton {
+                        objectName: "apply_history_limit"
+                        text: qsTr("Apply limit")
+                        onClicked: settings_page.service.history_limit = history_limit_input.value
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: qsTr("0 disables history. Lowering the limit removes older lookups.")
+                        opacity: 0.65
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    NotebookButton {
+                        objectName: "clear_history"
+                        text: qsTr("Clear history…")
+                        quiet: true
+                        onClicked: history_confirmation.open()
+                    }
+                }
+            }
+        }
+
+        NotebookSurface {
+            Layout.fillWidth: true
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 10
+                Label { text: qsTr("Local notebook files"); font.pixelSize: 17; font.bold: true }
+                Label {
+                    text: qsTr("Back up this vocabulary file to keep your word cards, translations and notes. Local files are not encrypted.")
+                    opacity: 0.65
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                Label { text: qsTr("Vocabulary file"); font.pixelSize: 12; font.bold: true }
                 TextArea {
                     text: settings_page.service.storage_path
                     textFormat: TextEdit.PlainText
@@ -102,7 +105,7 @@ ScrollView {
                     Layout.fillWidth: true
                 }
                 Label {
-                    text: qsTr("Lookup cache: %1").arg(settings_page.service.cache_path)
+                    text: qsTr("Disposable lookup cache: %1").arg(settings_page.service.cache_path)
                     textFormat: Text.PlainText
                     wrapMode: Text.WrapAnywhere
                     font.pixelSize: 10

@@ -12,6 +12,9 @@ private slots:
     void dictionary_cache_and_vocabulary();
     void lookup_without_selection_preserves_saved_attribution();
     void contextual_translation();
+    void translation_channels_cancel_with_draft_preferences_data();
+    void translation_channels_cancel_with_draft_preferences();
+    void manual_context_translation_round_trip();
     void failures_and_cancellation();
     void corrupt_store_is_preserved();
     void history_limit_and_recency();

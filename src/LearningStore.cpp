@@ -29,7 +29,7 @@ bool valid_card(const QJsonObject &card) {
         return false;
     // Older cards may omit optional fields. Unknown fields are deliberately
     // unrestricted and retained; known fields must have the types the UI uses.
-    for (const auto *key : {"language", "target_language", "context", "meaning", "translation", "notes",
+    for (const auto *key : {"language", "target_language", "context", "context_translation", "meaning", "translation", "notes",
              "article", "base_form", "base_article", "article_origin", "base_article_origin",
              "singular_status", "plural_status", "created", "updated"}) {
         if (card.contains(key) && !card.value(key).isString())

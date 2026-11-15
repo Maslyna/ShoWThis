@@ -112,8 +112,14 @@ if(BUILD_TESTING)
 
     qt_add_executable(OverlayTest tests/OverlayTest.cpp)
     target_link_libraries(OverlayTest PRIVATE showthis_ui Qt6::Test)
+    qt_add_executable(TranslatorDialogTest tests/TranslatorDialogTest.cpp)
+    target_link_libraries(TranslatorDialogTest PRIVATE showthis_ui Qt6::Test)
+    add_test(NAME TranslatorDialogTest COMMAND TranslatorDialogTest)
+    qt_add_executable(LanguagePickerTest tests/LanguagePickerTest.cpp)
+    target_link_libraries(LanguagePickerTest PRIVATE showthis_ui Qt6::Test)
+    add_test(NAME LanguagePickerTest COMMAND LanguagePickerTest)
     add_test(NAME OverlayTest COMMAND OverlayTest)
-    set_tests_properties(OverlayTest PROPERTIES
+    set_tests_properties(OverlayTest TranslatorDialogTest LanguagePickerTest PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software"
     )
 

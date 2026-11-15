@@ -8,6 +8,8 @@ ColumnLayout {
     required property bool wide_layout
     property bool context_selection_available: false
     signal context_selection_requested()
+    signal settings_requested()
+    signal translator_requested(string text, string field)
     property string card_id: ""
     property int selected_sense: -1
     property var draft_sense: ({})
@@ -15,16 +17,17 @@ ColumnLayout {
     property bool dirty: false
     property bool loading: false
     property int compact_page: 0
-    property bool context_expanded: false
     property bool lookup_attempted: false
     property alias word_prefix: card_form.word_prefix
-    readonly property bool busy: service.dictionary_busy || service.translator.busy
+    readonly property string current_word: word_input.text
+    readonly property bool busy: service.dictionary_busy
     readonly property var active_source: draft_sense.source && draft_sense.source.url ? draft_sense.source
         : saved_source.url ? saved_source : service.source
     readonly property var current_sense: selected_sense >= 0 && selected_sense < service.senses.length
         ? service.senses[selected_sense] : ({})
-    readonly property bool can_save: !busy && word_input.text.trim().length > 0
-        && (card_form.meaning.trim().length > 0 || card_form.translation.trim().length > 0)
+    readonly property bool can_save: !busy && current_word.trim().length > 0
+        && (card_form.meaning.trim().length > 0 || card_form.translation.trim().length > 0
+            || card_form.context_translation.trim().length > 0)
         && (card_id.length === 0 || dirty)
     spacing: 10
 
@@ -35,7 +38,7 @@ ColumnLayout {
     }
     function apply_context(text: string) {
         context_input.text = text
-        context_expanded = true
+        context_input.forceActiveFocus()
     }
     function load(action) {
         loading = true
@@ -53,15 +56,12 @@ ColumnLayout {
         saved_source = card.source || ({})
         draft_sense = card.sense || ({})
         selected_sense = -1
-        // Existing cards are never normalized merely by opening them.
         word_input.text = card.id ? card.word : (action.word || "").trim()
             .replace(/^[\s.,!?;:"“”„()]+|[\s.,!?;:"“”„()]+$/g, "")
         context_input.text = card.context || action.context || ""
         card_form.load(card)
         compact_page = card_id.length > 0 ? 1 : 0
-        context_expanded = false
         lookup_attempted = false
-        scroll.contentItem.contentY = 0
         loading = false
         dirty = false
         if (action.from_history) {
@@ -78,13 +78,12 @@ ColumnLayout {
         card_form.word_prefix = ""
         card_form.load_forms({})
         card_form.meaning = ""
-        card_form.translation = ""
         mark_dirty()
     }
     function lookup(refresh = false) {
         compact_page = 0
         lookup_attempted = true
-        service.lookup(word_input.text, context_input.text, refresh)
+        service.lookup(current_word, context_input.text, refresh)
     }
     function native_translation(sense): string {
         return (sense.translations || []).filter(function(item) {
@@ -92,9 +91,7 @@ ColumnLayout {
         }).map(function(item) { return item.word }).join(", ")
     }
     function select_sense(index: int) {
-        // A pending response belongs to the previous word/sense, even when
-        // the newly chosen sense has the same headword.
-        service.translator.clear()
+        service.translator.clear_word()
         selected_sense = index
         draft_sense = current_sense
         if (current_sense.headword) word_input.text = current_sense.headword
@@ -112,242 +109,236 @@ ColumnLayout {
     }
     function save_card() {
         if (!can_save) return
-        if (service.save_word(card_id, word_input.text, context_input.text,
-                card_form.meaning, card_form.translation,
+        if (service.save_word(card_id, current_word, context_input.text,
+                card_form.context_translation, card_form.meaning, card_form.translation,
                 card_form.notes, draft_sense, card_form.word_prefix, card_form.word_forms())) {
             if (card_id.length === 0) card_id = service.vocabulary[0].id
             dirty = false
         }
     }
+    function appended(current: string, text: string): string {
+        return current.trim().length === 0 ? text : current + (current.endsWith("\n") ? "" : "\n") + text
+    }
+    function add_to_card(field: string, text: string, target_language: string): bool {
+        const addition = text.trim()
+        if (current_word.trim().length === 0 || addition.length === 0
+                || ["translation", "context_translation", "meaning", "notes", "context"].indexOf(field) < 0)
+            return false
+        if ((field === "translation" || field === "context_translation") && target_language.length > 0)
+            service.target_language = target_language
+        switch (field) {
+        case "translation": card_form.translation = appended(card_form.translation, addition); break
+        case "context_translation": card_form.context_translation = appended(card_form.context_translation, addition); break
+        case "meaning": card_form.meaning = appended(card_form.meaning, addition); break
+        case "notes": card_form.notes = appended(card_form.notes, addition); break
+        case "context": context_input.text = appended(context_input.text, addition); break
+        }
+        compact_page = 1
+        mark_dirty()
+        return true
+    }
 
     Connections {
         target: editor.service
         function onLookup_changed() { editor.selected_sense = -1 }
-    }
-    Connections {
-        target: editor.service.translator
-        function onTranslated(text) {
-            card_form.translation = text
-            editor.mark_dirty()
-        }
+        function onPreferences_changed() { editor.mark_dirty() }
     }
 
-    ScrollView {
-        id: scroll
+    NotebookSurface {
         Layout.fillWidth: true
-        Layout.fillHeight: true
-        clip: true
-        contentWidth: availableWidth
-        ScrollBar.vertical.policy: editor.wide_layout ? ScrollBar.AsNeeded : ScrollBar.AlwaysOn
+        padding: 10
         ColumnLayout {
-            width: parent.width
-            spacing: 12
-            NotebookSurface {
-                id: search_surface
+            anchors.fill: parent
+            spacing: 6
+            RowLayout {
                 Layout.fillWidth: true
-                padding: 12
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 8
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-                        TextField {
-                            id: word_input
-                            objectName: "lookup_word"
-                            Layout.fillWidth: true
-                            Layout.minimumWidth: 0
-                            font.pixelSize: 26
-                            placeholderText: qsTr("Type a word…")
-                            background: null
-                            selectByMouse: true
-                            enabled: !editor.busy
-                            Accessible.name: qsTr("Word to look up")
-                            onAccepted: if (lookup_button.enabled) editor.lookup()
-                            onTextEdited: editor.reset_lookup()
-                        }
-                        NotebookLanguagePicker {
-                            objectName: "lookup_language"
-                            options: editor.service.language_options
-                            language_code: editor.service.source_language
-                            compact: !editor.wide_layout
-                            Layout.preferredWidth: editor.wide_layout ? 120 : 64
-                            enabled: !editor.busy
-                            Accessible.name: qsTr("Word language, separate from OCR")
-                            onLanguage_selected: function(code) {
-                                const previous = editor.service.source_language
-                                editor.service.source_language = code
-                                if (editor.service.source_language !== previous) editor.reset_lookup()
-                            }
-                        }
-                        NotebookButton {
-                            id: lookup_button
-                            objectName: "lookup_dictionary"
-                            text: editor.service.dictionary_busy ? qsTr("Looking…") : qsTr("Look up")
-                            primary: true
-                            enabled: !editor.busy && word_input.text.trim().length > 0
-                            onClicked: editor.lookup()
-                            ToolTip.visible: hovered
-                            ToolTip.text: qsTr("Send only this word to the selected dictionaries · Enter")
-                        }
-                        NotebookButton {
-                            objectName: "refresh_dictionary"
-                            text: "↻"
-                            quiet: true
-                            enabled: !editor.busy && word_input.text.trim().length > 0
-                            Accessible.name: qsTr("Refresh dictionary lookup")
-                            onClicked: editor.lookup(true)
-                            ToolTip.visible: hovered
-                            ToolTip.text: qsTr("Fetch fresh results instead of using the lookup cache")
-                        }
+                spacing: 8
+                TextField {
+                    id: word_input
+                    objectName: "lookup_word"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    font.pixelSize: 24
+                    placeholderText: qsTr("Word")
+                    background: null
+                    selectByMouse: true
+                    enabled: !editor.busy
+                    Accessible.name: qsTr("Word to look up")
+                    onAccepted: if (lookup_button.enabled) editor.lookup()
+                    onTextEdited: editor.reset_lookup()
+                }
+                NotebookLanguagePicker {
+                    objectName: "lookup_language"
+                    options: editor.service.language_options
+                    language_code: editor.service.source_language
+                    compact: !editor.wide_layout
+                    Layout.preferredWidth: editor.wide_layout ? 120 : 64
+                    enabled: !editor.busy
+                    Accessible.name: qsTr("Dictionary language")
+                    onLanguage_selected: function(code) {
+                        const previous = editor.service.source_language
+                        editor.service.source_language = code
+                        if (editor.service.source_language !== previous) editor.reset_lookup()
                     }
-                    NotebookDictionaryOptions {
-                        service: editor.service
-                        onChanged: {
-                            editor.selected_sense = -1
-                            editor.lookup_attempted = false
-                            editor.mark_dirty()
-                        }
-                    }
+                }
+                NotebookButton {
+                    id: lookup_button
+                    objectName: "lookup_dictionary"
+                    text: editor.busy ? qsTr("Looking…") : qsTr("Look up")
+                    primary: true
+                    enabled: !editor.busy && editor.current_word.trim().length > 0
+                    onClicked: editor.lookup()
+                }
+                NotebookButton {
+                    objectName: "translate_word"
+                    text: qsTr("Translate")
+                    quiet: true
+                    enabled: editor.current_word.trim().length > 0
+                    Accessible.name: qsTr("Translate word in separate window")
+                    onClicked: editor.translator_requested(editor.current_word, "translation")
+                }
+                NotebookButton {
+                    objectName: "refresh_dictionary"
+                    text: "↻"
+                    quiet: true
+                    enabled: !editor.busy && editor.current_word.trim().length > 0
+                    Accessible.name: qsTr("Refresh dictionary lookup")
+                    onClicked: editor.lookup(true)
                 }
             }
             RowLayout {
-                id: context_row
                 Layout.fillWidth: true
-                spacing: 12
-                Label { text: editor.wide_layout ? qsTr("IN CONTEXT") : qsTr("Context"); font.pixelSize: 10; font.bold: true; opacity: 0.5 }
-                Label {
-                    visible: !editor.wide_layout && !editor.context_expanded
-                    text: context_input.text || qsTr("Add the original sentence")
-                    textFormat: Text.PlainText
-                    elide: Text.ElideRight
-                    opacity: 0.65
+                spacing: 8
+                ScrollView {
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
-                }
-                ScrollView {
-                    visible: editor.wide_layout || editor.context_expanded
-                    Layout.fillWidth: true
                     Layout.preferredHeight: 56
                     clip: true
                     contentWidth: availableWidth
                     TextArea {
                         id: context_input
                         objectName: "word_context"
-                        placeholderText: qsTr("Your sentence, or the line captured by OCR…")
+                        placeholderText: qsTr("Context — type a sentence or select it from the screen")
+                        font.pixelSize: 13
                         textFormat: TextEdit.PlainText
                         wrapMode: TextEdit.Wrap
                         selectByMouse: true
-                        enabled: !editor.service.translator.busy
-                        Accessible.name: qsTr("Original sentence")
+                        Accessible.name: qsTr("Context")
                         onTextChanged: editor.mark_dirty()
                     }
                 }
                 NotebookButton {
-                    visible: !editor.wide_layout
-                    text: editor.context_expanded ? qsTr("Done") : qsTr("Edit")
-                    quiet: true
-                    onClicked: editor.context_expanded = !editor.context_expanded
-                }
-                NotebookButton {
                     objectName: "select_context"
-                    text: qsTr("Select context")
+                    text: qsTr("Select")
                     quiet: true
                     enabled: editor.context_selection_available && !editor.busy
+                    Accessible.name: qsTr("Select context from screen")
                     onClicked: editor.context_selection_requested()
-                    ToolTip.visible: hovered
-                    ToolTip.text: editor.context_selection_available
-                        ? qsTr("Draw rectangles to add context words; click words to include or exclude them.")
-                        : qsTr("Capture a screen with recognized words to select context.")
-                }
-            }
-            RowLayout {
-                visible: !editor.wide_layout
-                Layout.fillWidth: true
-                NotebookButton {
-                    objectName: "compact_dictionary"
-                    text: qsTr("Dictionary (%1)").arg(editor.service.senses.length)
-                    checked: editor.compact_page === 0
-                    quiet: true
-                    Layout.fillWidth: true
-                    onClicked: editor.compact_page = 0
                 }
                 NotebookButton {
-                    objectName: "compact_word_card"
-                    text: qsTr("My word card")
-                    checked: editor.compact_page === 1
+                    objectName: "translate_context"
+                    text: qsTr("Translate")
                     quiet: true
-                    Layout.fillWidth: true
-                    onClicked: editor.compact_page = 1
-                }
-            }
-            GridLayout {
-                objectName: "word_columns"
-                columns: editor.wide_layout ? 2 : 1
-                columnSpacing: 12
-                rowSpacing: 12
-                Layout.fillWidth: true
-                readonly property real card_height: editor.wide_layout
-                    ? Math.max(240, scroll.availableHeight - search_surface.height - context_row.height - 36)
-                    : Math.max(190, scroll.availableHeight - search_surface.height - context_row.height - 86)
-                NotebookDictionary {
-                    service: editor.service
-                    word: word_input.text
-                    selected_sense: editor.selected_sense
-                    current_sense: editor.current_sense
-                    active_source: editor.active_source
-                    lookup_attempted: editor.lookup_attempted
-                    wide_layout: editor.wide_layout
-                    visible: editor.wide_layout || editor.compact_page === 0
-                    Layout.fillWidth: true
-                    Layout.preferredWidth: 1
-                    Layout.preferredHeight: parent.card_height
-                    onSense_selected: function(index) { editor.select_sense(index) }
-                    onManual_meaning_requested: editor.compact_page = 1
-                    onHeadword_requested: function(word) { editor.search_headword(word) }
-                }
-                NotebookCardEditor {
-                    id: card_form
-                    service: editor.service
-                    word: word_input.text
-                    card_id: editor.card_id
-                    dirty: editor.dirty
-                    wide_layout: editor.wide_layout
-                    visible: editor.wide_layout || editor.compact_page === 1
-                    Layout.fillWidth: true
-                    Layout.preferredWidth: 1
-                    Layout.preferredHeight: parent.card_height
-                    onEdited: editor.mark_dirty()
-                    onTranslation_language_changed: {
-                        translation = editor.native_translation(editor.draft_sense)
-                        editor.mark_dirty()
-                    }
-                    onTranslate_requested: editor.service.translate(word_input.text, context_input.text)
+                    enabled: context_input.text.trim().length > 0
+                    Accessible.name: qsTr("Translate context in separate window")
+                    onClicked: editor.translator_requested(context_input.text, "context_translation")
                 }
             }
         }
     }
     RowLayout {
+        visible: !editor.wide_layout
+        Layout.fillWidth: true
+        spacing: 4
+        NotebookButton {
+            objectName: "compact_dictionary"
+            text: qsTr("Dictionary (%1)").arg(editor.service.senses.length)
+            checked: editor.compact_page === 0
+            quiet: true
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            onClicked: editor.compact_page = 0
+        }
+        NotebookButton {
+            objectName: "compact_word_card"
+            text: qsTr("My word card")
+            checked: editor.compact_page === 1
+            quiet: true
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            onClicked: editor.compact_page = 1
+        }
+    }
+    SplitView {
+        id: columns
+        objectName: "word_columns"
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        Layout.minimumHeight: 0
+        orientation: Qt.Horizontal
+        handle: Rectangle {
+            id: divider
+            objectName: "workspace_divider"
+            implicitWidth: 12
+            color: "transparent"
+            Rectangle {
+                anchors.centerIn: parent
+                width: divider.SplitHandle.hovered || divider.SplitHandle.pressed ? 4 : 2
+                height: Math.min(56, parent.height)
+                radius: width / 2
+                color: divider.SplitHandle.pressed ? columns.palette.highlight
+                    : Qt.alpha(columns.palette.windowText, divider.SplitHandle.hovered ? 0.45 : 0.2)
+            }
+        }
+        NotebookDictionary {
+            service: editor.service
+            word: word_input.text
+            selected_sense: editor.selected_sense
+            current_sense: editor.current_sense
+            active_source: editor.active_source
+            lookup_attempted: editor.lookup_attempted
+            wide_layout: editor.wide_layout
+            visible: editor.wide_layout || editor.compact_page === 0
+            SplitView.minimumWidth: editor.wide_layout ? 220 : 0
+            SplitView.preferredWidth: columns.width * 0.48
+            onSense_selected: function(index) { editor.select_sense(index) }
+            onManual_meaning_requested: editor.compact_page = 1
+            onHeadword_requested: function(word) { editor.search_headword(word) }
+            onSources_changed: {
+                editor.selected_sense = -1
+                editor.lookup_attempted = false
+            }
+        }
+        NotebookCardEditor {
+            id: card_form
+            service: editor.service
+            word: word_input.text
+            card_id: editor.card_id
+            dirty: editor.dirty
+            wide_layout: editor.wide_layout
+            visible: editor.wide_layout || editor.compact_page === 1
+            SplitView.minimumWidth: editor.wide_layout ? 260 : 0
+            SplitView.fillWidth: true
+            onEdited: editor.mark_dirty()
+        }
+    }
+    RowLayout {
         Layout.fillWidth: true
         Label {
-            text: word_input.text.trim().length === 0 ? qsTr("Start with a word above.")
-                : card_form.meaning.trim().length === 0 && card_form.translation.trim().length === 0
-                    ? qsTr("Choose a meaning or add a translation to save.")
-                : editor.card_id.length > 0 && !editor.dirty ? qsTr("✓ In your collection")
-                : qsTr("Ready to save · Ctrl+S")
-            opacity: 0.6
+            text: editor.card_id.length > 0 && !editor.dirty ? qsTr("Saved")
+                : editor.dirty ? qsTr("Unsaved changes") : qsTr("New card")
+            opacity: 0.65
             font.pixelSize: 12
-            elide: Text.ElideRight
             Layout.fillWidth: true
         }
         NotebookButton {
             objectName: "save_word"
-            text: editor.card_id.length > 0 ? (editor.dirty ? qsTr("Save changes") : qsTr("Saved ✓")) : qsTr("Save word")
+            text: editor.card_id.length > 0 ? qsTr("Save changes") : qsTr("Save word")
             primary: true
             enabled: editor.can_save
             onClicked: editor.save_card()
             ToolTip.visible: hovered
-            ToolTip.text: qsTr("Save to your vocabulary · Ctrl+S")
+            ToolTip.text: qsTr("Save card · Ctrl+S")
         }
     }
 }

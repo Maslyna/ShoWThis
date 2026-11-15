@@ -32,6 +32,7 @@ public slots:
     void toggle_overlay();
     void hide_overlay();
     Q_SCRIPTABLE void show_notebook();
+    Q_SCRIPTABLE void show_translator();
     void wait_for_finished();
     void set_cancel_handler(std::function<void()> handler) { m_cancel = std::move(handler); }
 

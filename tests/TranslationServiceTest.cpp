@@ -5,11 +5,13 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QSignalSpy>
+#include <QUrlQuery>
 #include <QTemporaryDir>
 #include <QtTest>
 
 #include "TestNetwork.h"
 #include "TranslationService.h"
+#include "LearningService.h"
 
 // A keyless provider with a different protocol proves that neither credentials,
 // JSON, POST, nor a context parameter are requirements of TranslationService.
@@ -20,8 +22,11 @@ public:
     QVariantList configuration_fields() const override { return {}; }
     showthis::TranslationRequest make_request(const QString &word, const QString &context,
         const QString &source, const QString &target, const QVariantMap &) const override {
-        QNetworkRequest request(QUrl(QStringLiteral("https://translator.invalid/translate")));
-        request.setRawHeader("X-Word", word.toUtf8());
+        QUrl url(QStringLiteral("https://translator.invalid/translate"));
+        QUrlQuery query;
+        query.addQueryItem("q", word);
+        url.setQuery(query);
+        QNetworkRequest request(url);
         request.setRawHeader("X-Context", context.toUtf8());
         request.setRawHeader("X-Languages", (source + ':' + target).toUtf8());
         return {request, "GET", {}};
@@ -49,9 +54,22 @@ private slots:
         QSignalSpy errors(&service, &showthis::TranslationService::error_occurred);
         QVERIFY(service.provider_id().isEmpty());
         QVERIFY(!service.configured());
+        QCOMPARE(service.provider_name(), QString("Off (manual translations)"));
+        QCOMPARE(service.providers()[0].toMap().value("name").toString(), service.provider_name());
         service.translate("Haus", "Das Haus", "de", "ru");
         QCOMPARE(errors.size(), 1);
         QVERIFY(network.requests.isEmpty());
+        QVERIFY(!service.word_error().isEmpty());
+        QVERIFY(service.context_error().isEmpty());
+        service.translate_context("Das Haus", "de", "ru");
+        QCOMPARE(errors.size(), 2);
+        QVERIFY(!service.context_error().isEmpty());
+        QVERIFY(network.requests.isEmpty());
+        service.clear_word();
+        QVERIFY(service.word_error().isEmpty());
+        QVERIFY(!service.context_error().isEmpty());
+        service.clear_context();
+        QVERIFY(service.context_error().isEmpty());
         service.set_provider_id("deepl");
         QVERIFY(!service.configured());
         service.translate("Haus", "", "de", "ru");
@@ -91,7 +109,7 @@ private slots:
 
     void configuration_changes_cancel_pending_requests_data() {
         QTest::addColumn<QString>("change");
-        for (const auto *change : {"disable", "credentials", "plan", "forget", "clear"})
+        for (const auto *change : {"disable", "provider", "credentials", "plan", "forget"})
             QTest::newRow(change) << QString::fromLatin1(change);
     }
     void configuration_changes_cancel_pending_requests() {
@@ -103,22 +121,41 @@ private slots:
         service.set_provider_id("deepl");
         service.set_option("api_key", "test-key");
         QSignalSpy translated(&service, &showthis::TranslationService::translated);
+        QSignalSpy context_translated(&service, &showthis::TranslationService::context_translated);
+        QSignalSpy session_translated(&service, &showthis::TranslationService::session_translated);
         QSignalSpy errors(&service, &showthis::TranslationService::error_occurred);
         service.translate("Haus", "Das Haus", "de", "ru");
+        auto pending_word = network.last_reply;
+        service.translate_context("Das Haus", "de", "ru");
         QVERIFY(service.busy());
         auto pending = network.last_reply;
+        service.translate_session("Independent passage", "de", "uk");
+        auto pending_session = network.last_reply;
+        QVERIFY(service.session_busy());
         if (change == "disable") service.set_provider_id("");
+        else if (change == "provider") service.set_provider_id("libretranslate");
         else if (change == "credentials") service.set_option("api_key", "replacement");
         else if (change == "plan") service.set_option("plan", "pro");
-        else if (change == "forget") service.forget_credentials();
-        else service.clear();
+        else service.forget_credentials();
         QVERIFY(!service.busy());
+        QVERIFY(!service.session_busy());
+        QVERIFY(service.session_text().isEmpty());
+        QVERIFY(service.session_error().isEmpty());
+        QVERIFY(!pending_session || pending_session->isFinished());
         QVERIFY(service.text().isEmpty());
         QVERIFY(!pending || pending->isFinished());
+        QVERIFY(!pending_word || pending_word->isFinished());
+        QVERIFY(service.context_text().isEmpty());
+        QVERIFY(service.word_error().isEmpty());
+        QVERIFY(service.context_error().isEmpty());
+        if (pending_word) QMetaObject::invokeMethod(pending_word, "finished", Qt::DirectConnection);
         if (pending) pending->complete();
+        if (pending_session) QMetaObject::invokeMethod(pending_session, "finished", Qt::DirectConnection);
         QCoreApplication::processEvents();
         QCOMPARE(translated.size(), 0);
         QCOMPARE(errors.size(), 0);
+        QCOMPARE(context_translated.size(), 0);
+        QCOMPARE(session_translated.size(), 0);
     }
 
     void replacement_request_wins() {
@@ -146,9 +183,19 @@ private slots:
         service->set_option("api_key", "test-key");
         service->translate("Haus", "", "de", "ru");
         auto pending = network.last_reply;
+        service->translate_context("Das Haus", "de", "ru");
+        auto pending_context = network.last_reply;
+        service->translate_session("Independent passage", "de", "uk");
+        auto pending_session = network.last_reply;
+        QVERIFY(service->session_busy());
         QVERIFY(service->busy());
         service.reset();
         QVERIFY(!pending || pending->isFinished());
+        QVERIFY(!pending_context || pending_context->isFinished());
+        QVERIFY(!pending_session || pending_session->isFinished());
+        if (pending) QMetaObject::invokeMethod(pending, "finished", Qt::DirectConnection);
+        if (pending_context) QMetaObject::invokeMethod(pending_context, "finished", Qt::DirectConnection);
+        if (pending_session) QMetaObject::invokeMethod(pending_session, "finished", Qt::DirectConnection);
     }
 
     void provider_errors_data() {
@@ -182,6 +229,8 @@ private slots:
         QVERIFY(errors[0][0].toString().contains(message));
         QCOMPARE(translated.size(), 0);
         QVERIFY(service.text().isEmpty());
+        QCOMPARE(service.word_error(), errors[0][0].toString());
+        QVERIFY(service.context_error().isEmpty());
     }
 
     void libretranslate_request_data() {
@@ -352,6 +401,8 @@ private slots:
         QVERIFY2(errors[0][0].toString().contains(message), qPrintable(errors[0][0].toString()));
         QCOMPARE(translated.size(), 0);
         QVERIFY(service.text().isEmpty());
+        QCOMPARE(service.word_error(), errors[0][0].toString());
+        QVERIFY(service.context_error().isEmpty());
     }
 
     void libretranslate_real_http_and_redirect_privacy() {
@@ -431,7 +482,7 @@ private slots:
         showthis::TranslationProviders providers;
         providers.push_back(std::make_unique<TestTranslator>());
         showthis::TranslationService service(nullptr, &network, std::move(providers));
-        QCOMPARE(service.providers().size(), 2); // None plus the injected provider.
+        QCOMPARE(service.providers().size(), 2); // Off plus the injected provider.
         service.set_provider_id("test");
         QVERIFY(service.configured());
         QVERIFY(!service.supports_context());
@@ -439,10 +490,330 @@ private slots:
         service.translate("Haus", "private context", "de", "ru");
         QTRY_VERIFY(!service.busy());
         QCOMPARE(service.text(), QString("translated by another provider"));
-        QCOMPARE(network.requests[0].rawHeader("X-Word"), QByteArray("Haus"));
+        QCOMPARE(QUrlQuery(network.requests[0].url()).queryItemValue("q", QUrl::FullyDecoded), QString("Haus"));
         QCOMPARE(network.requests[0].rawHeader("X-Languages"), QByteArray("de:ru"));
         QVERIFY(network.requests[0].rawHeader("X-Context").isEmpty());
         QVERIFY(network.payloads[0].isEmpty());
+    }
+
+    void concurrent_channels_complete_out_of_order_data() {
+        QTest::addColumn<bool>("context_first");
+        QTest::newRow("context-first") << true;
+        QTest::newRow("word-first") << false;
+    }
+
+    void concurrent_channels_complete_out_of_order() {
+        QFETCH(bool, context_first);
+        TestNetwork network;
+        network.automatic = false;
+        showthis::TranslationService service(nullptr, &network);
+        service.set_provider_id("deepl");
+        service.set_option("api_key", "test-key");
+        QSignalSpy words(&service, &showthis::TranslationService::translated);
+        QSignalSpy contexts(&service, &showthis::TranslationService::context_translated);
+        network.response = R"({"translations":[{"text":"house"}]})";
+        service.translate("Haus", "Das Haus ist gross.", "de", "en");
+        auto word = network.last_reply;
+        network.response = R"({"translations":[{"text":"The house is big."}]})";
+        service.translate_context("Das Haus ist gross.", "de", "en");
+        auto context = network.last_reply;
+        QVERIFY(service.word_busy());
+        QVERIFY(service.context_busy());
+        QVERIFY(service.busy());
+        const auto word_body = QJsonDocument::fromJson(network.payloads[0]).object();
+        QCOMPARE(word_body.value("context").toString(), QString("Das Haus ist gross."));
+        const auto context_body = QJsonDocument::fromJson(network.payloads[1]).object();
+        QCOMPARE(context_body.value("text").toArray(), QJsonArray{"Das Haus ist gross."});
+        QVERIFY(context_body.value("context").toString().isEmpty());
+        (context_first ? context : word)->complete();
+        QCOMPARE(service.word_busy(), context_first);
+        QCOMPARE(service.context_busy(), !context_first);
+        QVERIFY(service.busy());
+        QCOMPARE(words.size(), context_first ? 0 : 1);
+        QCOMPARE(contexts.size(), context_first ? 1 : 0);
+        (context_first ? word : context)->complete();
+        QVERIFY(!service.busy());
+        QCOMPARE(words.size(), 1);
+        QCOMPARE(contexts.size(), 1);
+        QCOMPARE(service.text(), QString("house"));
+        QCOMPARE(service.context_text(), QString("The house is big."));
+        QVERIFY(service.word_error().isEmpty());
+        QVERIFY(service.context_error().isEmpty());
+    }
+
+    void channel_cancel_and_replacement_are_isolated_data() {
+        QTest::addColumn<bool>("context_channel");
+        QTest::addColumn<bool>("replace");
+        QTest::newRow("cancel-word") << false << false;
+        QTest::newRow("cancel-context") << true << false;
+        QTest::newRow("replace-word") << false << true;
+        QTest::newRow("replace-context") << true << true;
+    }
+
+    void channel_cancel_and_replacement_are_isolated() {
+        QFETCH(bool, context_channel);
+        QFETCH(bool, replace);
+        TestNetwork network;
+        network.automatic = false;
+        network.response = R"({"translations":[{"text":"original word"}]})";
+        showthis::TranslationService service(nullptr, &network);
+        service.set_provider_id("deepl");
+        service.set_option("api_key", "test-key");
+        QSignalSpy words(&service, &showthis::TranslationService::translated);
+        QSignalSpy contexts(&service, &showthis::TranslationService::context_translated);
+        service.translate("Haus", "Das Haus", "de", "en");
+        auto word = network.last_reply;
+        network.response = R"({"translations":[{"text":"original context"}]})";
+        service.translate_context("Das Haus", "de", "en");
+        auto context = network.last_reply;
+        auto cancelled = context_channel ? context : word;
+        auto unaffected = context_channel ? word : context;
+        if (replace) {
+            network.response = R"({"translations":[{"text":"replacement"}]})";
+            if (context_channel) service.translate_context("Neuer Kontext", "de", "en");
+            else service.translate("Baum", "", "de", "en");
+        } else {
+            if (context_channel) service.clear_context();
+            else service.clear_word();
+        }
+        QVERIFY(cancelled->isFinished());
+        QVERIFY(!unaffected->isFinished());
+        // Even an ill-behaved reply emitting finished again cannot publish stale data.
+        QMetaObject::invokeMethod(cancelled, "finished", Qt::DirectConnection);
+        QCOMPARE(words.size(), 0);
+        QCOMPARE(contexts.size(), 0);
+        unaffected->complete();
+        QCOMPARE(context_channel ? service.text() : service.context_text(),
+            context_channel ? QString("original word") : QString("original context"));
+        if (replace) {
+            QVERIFY(service.busy());
+            network.last_reply->complete();
+        }
+        QVERIFY(!service.busy());
+        QCOMPARE(context_channel ? service.context_text() : service.text(),
+            replace ? QString("replacement") : QString{});
+        QCOMPARE(words.size(), context_channel || replace ? 1 : 0);
+        QCOMPARE(contexts.size(), !context_channel || replace ? 1 : 0);
+    }
+
+    void channel_errors_are_isolated_data() {
+        QTest::addColumn<bool>("context_error");
+        QTest::newRow("word-error") << false;
+        QTest::newRow("context-error") << true;
+    }
+
+    void channel_errors_are_isolated() {
+        QFETCH(bool, context_error);
+        TestNetwork network;
+        network.automatic = false;
+        showthis::TranslationService service(nullptr, &network);
+        service.set_provider_id("deepl");
+        service.set_option("api_key", "test-key");
+        QSignalSpy errors(&service, &showthis::TranslationService::error_occurred);
+        network.status = context_error ? 200 : 403;
+        network.response = R"({"translations":[{"text":"word result"}]})";
+        service.translate("Haus", "", "de", "en");
+        auto word = network.last_reply;
+        network.status = context_error ? 403 : 200;
+        network.response = R"({"translations":[{"text":"context result"}]})";
+        service.translate_context("Das Haus", "de", "en");
+        auto context = network.last_reply;
+        (context_error ? context : word)->complete();
+        QCOMPARE(errors.size(), 1);
+        QVERIFY((context_error ? service.context_error() : service.word_error()).contains("API key"));
+        QVERIFY((context_error ? service.word_error() : service.context_error()).isEmpty());
+        (context_error ? word : context)->complete();
+        QCOMPARE(errors.size(), 1);
+        QCOMPARE(context_error ? service.text() : service.context_text(),
+            context_error ? QString("word result") : QString("context result"));
+        // Retrying or clearing the successful channel does not hide the other error.
+        if (context_error) service.clear_word();
+        else service.clear_context();
+        QVERIFY(!(context_error ? service.context_error() : service.word_error()).isEmpty());
+        if (context_error) service.translate_context("Retry", "de", "en");
+        else service.translate("Retry", "", "de", "en");
+        QVERIFY(service.word_error().isEmpty());
+        QVERIFY(service.context_error().isEmpty());
+        service.clear();
+    }
+
+    void libretranslate_context_uses_primary_input() {
+        TestNetwork network;
+        network.response = R"({"translatedText":"The entire selected passage.\nA second sentence."})";
+        showthis::TranslationService service(nullptr, &network);
+        service.set_provider_id("libretranslate");
+        QVERIFY(!service.supports_context());
+        const QString passage = "Die gesamte Auswahl.\nEin zweiter Satz.";
+        QSignalSpy words(&service, &showthis::TranslationService::translated);
+        QSignalSpy contexts(&service, &showthis::TranslationService::context_translated);
+        service.translate_context(passage, "de", "en");
+        QTRY_COMPARE(contexts.size(), 1);
+        QCOMPARE(words.size(), 0);
+        const auto payload = QJsonDocument::fromJson(network.payloads[0]).object();
+        QCOMPARE(payload.value("q").toString(), passage);
+        QCOMPARE(payload.value("source").toString(), QString("de"));
+        QCOMPARE(payload.value("target").toString(), QString("en"));
+        QVERIFY(!payload.contains("context"));
+        QVERIFY(service.text().isEmpty());
+        QCOMPARE(service.context_text(), QString("The entire selected passage.\nA second sentence."));
+    }
+
+    void session_survives_notebook_clear_and_draft_changes() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        TestNetwork network;
+        network.automatic = false;
+        network.response = R"({"translations":[{"text":"independent result"}]})";
+        showthis::LearningService learning(nullptr, directory.filePath("notebook.json"), &network);
+        auto *service = learning.translator();
+        service->set_provider_id("deepl");
+        service->set_option("api_key", "test-key");
+        QSignalSpy sessions(service, &showthis::TranslationService::session_translated);
+        service->translate("Haus", "Das Haus", "de", "en");
+        auto word = network.last_reply;
+        service->translate_context("Das Haus", "de", "en");
+        auto context = network.last_reply;
+        service->translate_session("Standalone text", "de", "uk");
+        auto session = network.last_reply;
+        QVERIFY(service->session_busy());
+        QVERIFY(service->busy());
+        learning.clear();
+        QVERIFY(!service->busy());
+        QVERIFY(word->isFinished());
+        QVERIFY(context->isFinished());
+        learning.prepare_draft({{"language", "fr"}, {"target_language", "en"}}, false);
+        learning.set_source_language("it");
+        learning.set_target_language("pl");
+        QVERIFY(service->session_busy());
+        QVERIFY(!session->isFinished());
+        QCOMPARE(network.requests.size(), 3);
+        session->complete();
+        QCOMPARE(sessions.size(), 1);
+        QCOMPARE(service->session_text(), QString("independent result"));
+        learning.clear();
+        QCOMPARE(service->session_text(), QString("independent result"));
+    }
+
+    void session_cancel_and_replacement_are_isolated_data() {
+        QTest::addColumn<bool>("replace");
+        QTest::newRow("cancel") << false;
+        QTest::newRow("replace") << true;
+    }
+
+    void session_cancel_and_replacement_are_isolated() {
+        QFETCH(bool, replace);
+        TestNetwork network;
+        network.automatic = false;
+        network.response = R"({"translations":[{"text":"notebook result"}]})";
+        showthis::TranslationService service(nullptr, &network);
+        service.set_provider_id("deepl");
+        service.set_option("api_key", "test-key");
+        service.translate("Haus", "Das Haus", "de", "en");
+        auto word = network.last_reply;
+        service.translate_context("Das Haus", "de", "en");
+        auto context = network.last_reply;
+        service.translate_session("Standalone", "de", "uk");
+        auto cancelled = network.last_reply;
+        QSignalSpy sessions(&service, &showthis::TranslationService::session_translated);
+        if (replace) {
+            network.response = R"({"translations":[{"text":"replacement"}]})";
+            service.translate_session("Replacement", "fr", "pl");
+        } else {
+            service.clear_session();
+        }
+        QVERIFY(cancelled->isFinished());
+        QVERIFY(!word->isFinished());
+        QVERIFY(!context->isFinished());
+        QMetaObject::invokeMethod(cancelled, "finished", Qt::DirectConnection);
+        QCOMPARE(sessions.size(), 0);
+        word->complete();
+        context->complete();
+        QVERIFY(!service.busy());
+        QCOMPARE(service.text(), QString("notebook result"));
+        QCOMPARE(service.context_text(), QString("notebook result"));
+        QCOMPARE(service.session_busy(), replace);
+        if (replace) network.last_reply->complete();
+        QCOMPARE(sessions.size(), replace ? 1 : 0);
+        QCOMPARE(service.session_text(), replace ? QString("replacement") : QString{});
+        QVERIFY(service.session_error().isEmpty());
+    }
+
+    void session_errors_do_not_change_notebook_messages() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        TestNetwork network;
+        network.automatic = false;
+        network.status = 403;
+        showthis::LearningService learning(nullptr, directory.filePath("notebook.json"), &network);
+        auto *service = learning.translator();
+        QSignalSpy errors(service, &showthis::TranslationService::error_occurred);
+        service->translate_session("Standalone", "de", "uk");
+        QVERIFY(!service->session_error().isEmpty());
+        QCOMPARE(errors.size(), 0);
+        service->set_provider_id("deepl");
+        service->set_option("api_key", "test-key");
+        const auto message = learning.message();
+        service->translate_session("Standalone", "de", "uk");
+        network.last_reply->complete();
+        QVERIFY(service->session_error().contains("API key"));
+        QVERIFY(service->session_text().isEmpty());
+        QVERIFY(service->word_error().isEmpty());
+        QVERIFY(service->context_error().isEmpty());
+        QCOMPARE(learning.message(), message);
+        QCOMPARE(errors.size(), 0);
+        service->clear();
+        QVERIFY(!service->session_error().isEmpty());
+        service->clear_session();
+        QVERIFY(service->session_error().isEmpty());
+    }
+
+    void session_uses_primary_text_data() {
+        QTest::addColumn<QString>("provider");
+        QTest::newRow("deepl") << QString("deepl");
+        QTest::newRow("libretranslate") << QString("libretranslate");
+        QTest::newRow("keyless-other-protocol") << QString("test");
+    }
+
+    void session_uses_primary_text() {
+        QFETCH(QString, provider);
+        TestNetwork network;
+        network.response = provider == "deepl" ? QByteArray(R"({"translations":[{"text":"result"}]})")
+            : provider == "libretranslate" ? QByteArray(R"({"translatedText":"result"})") : QByteArray("result");
+        auto providers = showthis::default_translation_providers();
+        providers.push_back(std::make_unique<TestTranslator>());
+        showthis::TranslationService service(nullptr, &network, std::move(providers));
+        service.set_provider_id(provider);
+        if (provider == "deepl") service.set_option("api_key", "test-key");
+        QSignalSpy sessions(&service, &showthis::TranslationService::session_translated);
+        QSignalSpy words(&service, &showthis::TranslationService::translated);
+        QSignalSpy contexts(&service, &showthis::TranslationService::context_translated);
+        const QString passage = "Die gesamte Auswahl.\nEin zweiter Satz.";
+        service.translate_session(passage, "de", "uk");
+        QTRY_COMPARE(sessions.size(), 1);
+        QVERIFY(!service.busy());
+        QVERIFY(!service.session_busy());
+        QCOMPARE(service.session_text(), QString("result"));
+        QCOMPARE(words.size(), 0);
+        QCOMPARE(contexts.size(), 0);
+        QCOMPARE(network.requests.size(), 1);
+        if (provider == "test") {
+            QCOMPARE(QUrlQuery(network.requests[0].url()).queryItemValue("q", QUrl::FullyDecoded), passage);
+            QVERIFY(network.requests[0].rawHeader("X-Context").isEmpty());
+            QCOMPARE(network.requests[0].rawHeader("X-Languages"), QByteArray("de:uk"));
+        } else {
+            const auto payload = QJsonDocument::fromJson(network.payloads[0]).object();
+            if (provider == "deepl") {
+                QVERIFY(payload.value("context").toString().isEmpty());
+                QCOMPARE(payload.value("text").toArray(), QJsonArray{passage});
+                QCOMPARE(payload.value("source_lang").toString(), QString("DE"));
+                QCOMPARE(payload.value("target_lang").toString(), QString("UK"));
+            } else {
+                QVERIFY(!payload.contains("context"));
+                QCOMPARE(payload.value("q").toString(), passage);
+                QCOMPARE(payload.value("source").toString(), QString("de"));
+                QCOMPARE(payload.value("target").toString(), QString("uk"));
+            }
+        }
     }
 };
 

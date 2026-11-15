@@ -3,6 +3,9 @@
         <file>Overlay.qml</file>
         <file>ContextSelection.qml</file>
         <file>LearningPanel.qml</file>
+        <file>OverlayDialog.qml</file>
+        <file>NotebookDialog.qml</file>
+        <file>TranslatorDialog.qml</file>
         <file>NotebookButton.qml</file>
         <file>NotebookSurface.qml</file>
         <file>NotebookEmpty.qml</file>
@@ -12,6 +15,7 @@
         <file>NotebookOfflineDictionaries.qml</file>
         <file>NotebookTranslatorSettings.qml</file>
         <file>NotebookLanguagePicker.qml</file>
+        <file>SearchableComboBox.qml</file>
         <file>NotebookWordEditor.qml</file>
         <file>NotebookDictionary.qml</file>
         <file>NotebookDictionaryOptions.qml</file>

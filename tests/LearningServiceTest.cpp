@@ -43,7 +43,7 @@ static QByteArray dictionary_response() {
             QCOMPARE(network.requests.size(), 1);
             QCOMPARE(network.requests[0].url().path(), QString("/api/v1/entries/de/Haus"));
             QVERIFY(network.payloads[0].isEmpty());
-            QVERIFY(service.save_word({}, "Haus", "Das ist mein Haus.", "house", "будинок", "das Haus", service.senses()[0].toMap()));
+            QVERIFY(service.save_word({}, "Haus", "Das ist mein Haus.", "", "house", "будинок", "das Haus", service.senses()[0].toMap()));
             QCOMPARE(service.vocabulary().size(), 1);
             const auto card = service.vocabulary()[0].toMap();
             card_id = card.value("id").toString();
@@ -61,10 +61,10 @@ static QByteArray dictionary_response() {
             service.lookup("Haus");
             QCOMPARE(service.senses().size(), 2);
             QCOMPARE(network.requests.size(), 0);  // A new session works offline from cache.
-            QVERIFY(service.save_word(card_id, "Haus", "Das ist mein Haus.", "house", "дім", "updated", service.senses()[0].toMap()));
+            QVERIFY(service.save_word(card_id, "Haus", "Das ist mein Haus.", "", "house", "дім", "updated", service.senses()[0].toMap()));
             QCOMPARE(service.vocabulary().size(), 1);
             QCOMPARE(service.vocabulary()[0].toMap().value("notes").toString(), QString("updated"));
-            QVERIFY(!service.save_word({}, "", "", "", "", "", {}));
+            QVERIFY(!service.save_word({}, "", "", "", "", "", "", {}));
             QVERIFY(service.remove_word(card_id));
         }
         showthis::LearningService reopened(nullptr, path);
@@ -86,7 +86,7 @@ void LearningServiceTest::lookup_without_selection_preserves_saved_attribution()
     service.set_source_language("de");
     service.lookup("Haus");
     QTRY_COMPARE(service.senses().size(), 1);
-    QVERIFY(service.save_word({}, "Haus", "", "house", "", "", service.senses()[0].toMap()));
+    QVERIFY(service.save_word({}, "Haus", "", "", "house", "", "", service.senses()[0].toMap()));
     const auto original = service.vocabulary()[0].toMap();
     const auto id = original.value("id").toString();
     QCOMPARE(original.value("source").toMap().value("provider").toString(), QString("freedictionary"));
@@ -96,7 +96,7 @@ void LearningServiceTest::lookup_without_selection_preserves_saved_attribution()
     QTRY_VERIFY(!service.dictionary_busy());
     QCOMPARE(service.senses().size(), 1);
     QCOMPARE(service.source().value("provider").toString(), QString("kaikki"));
-    QVERIFY(service.save_word(id, "Haus", "", "house", "", "note-only edit", {}));
+    QVERIFY(service.save_word(id, "Haus", "", "", "house", "", "note-only edit", {}));
     const auto edited = service.vocabulary()[0].toMap();
     QCOMPARE(edited.value("source"), original.value("source"));
     QCOMPARE(edited.value("sense"), original.value("sense"));
@@ -114,11 +114,11 @@ void LearningServiceTest::lookup_without_selection_preserves_saved_attribution()
     QVERIFY(!bytes.contains("Kaikki.org"));
 
     // Only explicitly choosing a new sense replaces both attribution and sense.
-    QVERIFY(service.save_word(id, "Haus", "", "new definition", "", "", service.senses()[0].toMap()));
+    QVERIFY(service.save_word(id, "Haus", "", "", "new definition", "", "", service.senses()[0].toMap()));
     const auto replaced = service.vocabulary()[0].toMap();
     QCOMPARE(replaced.value("source"), service.senses()[0].toMap().value("source"));
     QCOMPARE(replaced.value("sense"), QVariant(service.senses()[0].toMap()));
-    QVERIFY(service.save_word({}, "Haus", "", "my own meaning", "", "", {}));
+    QVERIFY(service.save_word({}, "Haus", "", "", "my own meaning", "", "", {}));
     QVERIFY(service.vocabulary()[0].toMap().value("source").toMap().isEmpty());
     QVERIFY(service.vocabulary()[0].toMap().value("sense").toMap().isEmpty());
 }
@@ -143,7 +143,7 @@ void LearningServiceTest::lookup_without_selection_preserves_saved_attribution()
         QCOMPARE(payload.value("source_lang").toString(), QString("DE"));
         QCOMPARE(payload.value("target_lang").toString(), QString("UK"));
         QCOMPARE(payload.value("text").toArray()[0].toString(), QString("Haus"));
-        QVERIFY(service.save_word({}, "Haus", "Das ist mein Haus.", "house", translator->text(), "", {}));
+        QVERIFY(service.save_word({}, "Haus", "Das ist mein Haus.", "", "house", translator->text(), "", {}));
         QFile file(directory.filePath("words.json"));
         QVERIFY(file.open(QIODevice::ReadOnly));
         QVERIFY(!file.readAll().contains("test-key"));
@@ -230,7 +230,7 @@ void LearningServiceTest::lookup_without_selection_preserves_saved_attribution()
         file.close();
         showthis::LearningService service(nullptr, path);
         QVERIFY(!service.storage_error().isEmpty());
-        QVERIFY(!service.save_word({}, "Haus", "", "house", "", "", {}));
+        QVERIFY(!service.save_word({}, "Haus", "", "", "house", "", "", {}));
         service.set_history_limit(2);
         QCOMPARE(service.history_limit(), 1000); // A failed write must not commit a new limit.
         QVERIFY(file.open(QIODevice::ReadOnly));
@@ -262,7 +262,7 @@ void LearningServiceTest::history_limit_and_recency() {
     QCOMPARE(network.requests.size(), 2);
     QCOMPARE(service.dictionary_history().size(), 2);
     QCOMPARE(service.dictionary_history()[0].toMap().value("context").toString(), QString("Updated context"));
-    QVERIFY(service.save_word({}, "Haus", "Updated context", "house", "", "", service.senses()[0].toMap()));
+    QVERIFY(service.save_word({}, "Haus", "Updated context", "", "house", "", "", service.senses()[0].toMap()));
     service.lookup("Buch", "Third context");
     QTRY_VERIFY(!service.dictionary_busy());
     QCOMPARE(service.dictionary_history().size(), 2);
@@ -319,7 +319,7 @@ void LearningServiceTest::history_disabled_and_cleared() {
     service.set_source_language("de");
     service.lookup("Haus");
     QTRY_VERIFY(!service.dictionary_busy());
-    QVERIFY(service.save_word({}, "Haus", "", "house", "", "", service.senses()[0].toMap()));
+    QVERIFY(service.save_word({}, "Haus", "", "", "house", "", "", service.senses()[0].toMap()));
     network.automatic = false;
     service.lookup("next");
     QVERIFY(service.dictionary_busy());
@@ -382,9 +382,9 @@ void LearningServiceTest::anki_export() {
     service.lookup("Haus");
     QTRY_VERIFY(!service.dictionary_busy());
     const QString context = "<script>alert(1)</script>\t\"quoted\"\nSecond line";
-    QVERIFY(service.save_word({}, "Haus", context, "house & home", QString::fromUtf8("будинок"), "note\r\nnext", service.senses()[0].toMap(), "das"));
+    QVERIFY(service.save_word({}, "Haus", context, "", "house & home", QString::fromUtf8("будинок"), "note\r\nnext", service.senses()[0].toMap(), "das"));
     const auto first_id = service.vocabulary()[0].toMap().value("id").toString();
-    QVERIFY(service.save_word({}, "Baum", "tree context", "tree", "", "", {}));
+    QVERIFY(service.save_word({}, "Baum", "tree context", "", "tree", "", "", {}));
     const auto destination = QUrl::fromLocalFile(directory.filePath("anki.txt"));
     QVERIFY(service.export_anki(destination, {first_id}));
     QFile file(destination.toLocalFile());
@@ -465,7 +465,7 @@ void LearningServiceTest::dictionary_grammar() {
         QCOMPARE(parsed.value("article").toString(), expected.size() == 1 ? expected.first() : QString{});
         QCOMPARE(parsed.value("tags").toStringList(), tags);
     }
-    QVERIFY(service.save_word({}, "Haus", "", "house", "", "", service.senses()[0].toMap()));
+    QVERIFY(service.save_word({}, "Haus", "", "", "house", "", "", service.senses()[0].toMap()));
     QCOMPARE(service.vocabulary()[0].toMap().value("article").toString(),
         expected.size() == 1 ? expected.first() : QString{});
 }
@@ -481,27 +481,27 @@ void LearningServiceTest::article_persistence_and_legacy_cards() {
     QTRY_VERIFY(!service.dictionary_busy());
     // The German noun profile suggests the article; manual corrections win.
     QCOMPARE(service.senses()[1].toMap().value("tags").toStringList(), QStringList{"neuter"});
-    QVERIFY(service.save_word({}, "Haus", "", "house", "", "", service.senses()[1].toMap(), "das"));
+    QVERIFY(service.save_word({}, "Haus", "", "", "house", "", "", service.senses()[1].toMap(), "das"));
     auto card = service.vocabulary()[0].toMap();
     const auto id = card.value("id").toString();
     QCOMPARE(card.value("article").toString(), QString("das"));
-    QVERIFY(service.save_word(id, "Haus", "", "house", "", "manual correction", {}, "die"));
+    QVERIFY(service.save_word(id, "Haus", "", "", "house", "", "manual correction", {}, "die"));
     {
         showthis::LearningService reopened(nullptr, path);
         QCOMPARE(reopened.vocabulary()[0].toMap().value("article").toString(), QString("die"));
-        QVERIFY(reopened.save_word(id, "Haus", "", "house", "", "note-only edit", {}));
+        QVERIFY(reopened.save_word(id, "Haus", "", "", "house", "", "note-only edit", {}));
         QCOMPARE(reopened.vocabulary()[0].toMap().value("article").toString(), QString("die"));
-        QVERIFY(reopened.save_word(id, "Haus", "", "house", "", "explicitly no article", {}, ""));
+        QVERIFY(reopened.save_word(id, "Haus", "", "", "house", "", "explicitly no article", {}, ""));
     }
     {
         showthis::LearningService reopened(nullptr, path);
         QVERIFY(reopened.vocabulary()[0].toMap().value("article").toString().isEmpty());
     }
-    QVERIFY(!service.save_word({}, "Haus", "", "house", "", "", {}, QString(81, 'x')));
+    QVERIFY(!service.save_word({}, "Haus", "", "", "house", "", "", {}, QString(81, 'x')));
     service.set_source_language("fr");
-    QVERIFY(service.save_word({}, "maison", "", "house", "", "", {}, "la"));
+    QVERIFY(service.save_word({}, "maison", "", "", "house", "", "", {}, "la"));
     QCOMPARE(service.vocabulary()[0].toMap().value("article").toString(), QString("la"));
-    QVERIFY(service.save_word({}, "ami", "", "friend", "", "", {}, "l'"));
+    QVERIFY(service.save_word({}, "ami", "", "", "friend", "", "", {}, "l'"));
     const auto french_export = QUrl::fromLocalFile(directory.filePath("french.txt"));
     QVERIFY(service.export_anki(french_export));
     QFile french(french_export.toLocalFile());
@@ -585,9 +585,9 @@ void LearningServiceTest::retired_metadata_is_preserved() {
 
     showthis::LearningService service(nullptr, path);
     service.set_source_language("de");
-    QVERIFY(service.save_word("legacy", "Haus", context, "home", "", "updated note", {}));
+    QVERIFY(service.save_word("legacy", "Haus", context, "", "home", "", "updated note", {}));
     // Retired metadata is opaque: it must not prevent ordinary word editing.
-    QVERIFY(service.save_word("legacy", "Häuschen", context, "small house", "", "updated", {}));
+    QVERIFY(service.save_word("legacy", "Häuschen", context, "", "small house", "", "updated", {}));
     showthis::LearningService reopened(nullptr, path);
     const auto updated = reopened.vocabulary()[0].toMap();
     for (const auto &key : {"original_word", "lemma", "lemma_confirmed", "linguistics", "custom_field", "created"})
@@ -614,13 +614,126 @@ void LearningServiceTest::failed_write_does_not_commit_changes() {
     QVERIFY(blocker.open(QIODevice::WriteOnly));
     blocker.close();
     showthis::LearningService service(nullptr, path);
-    QVERIFY(!service.save_word({}, "word", "", "meaning", "", "", {}));
+    QVERIFY(!service.save_word({}, "word", "", "", "meaning", "", "", {}));
     QVERIFY(service.vocabulary().isEmpty());
     QVERIFY(!service.storage_error().isEmpty());
     service.set_history_limit(2);
     QCOMPARE(service.history_limit(), 1000);
     QVERIFY(blocker.remove());
-    QVERIFY(service.save_word({}, "word", "", "meaning", "", "", {}));
+    QVERIFY(service.save_word({}, "word", "", "", "meaning", "", "", {}));
     QCOMPARE(service.vocabulary().size(), 1);
     QVERIFY(service.storage_error().isEmpty());
+}
+
+void LearningServiceTest::translation_channels_cancel_with_draft_preferences_data() {
+    QTest::addColumn<QString>("change");
+    for (const auto *change : {"source", "target", "draft", "clear"})
+        QTest::newRow(change) << QString::fromLatin1(change);
+}
+
+void LearningServiceTest::translation_channels_cancel_with_draft_preferences() {
+    QFETCH(QString, change);
+    QTemporaryDir directory;
+    TestNetwork network;
+    network.automatic = false;
+    network.response = R"({"translations":[{"text":"stale result"}]})";
+    showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
+    service.set_source_language("de");
+    service.set_target_language("en");
+    auto *translator = service.translator();
+    translator->set_provider_id("deepl");
+    translator->set_option("api_key", "test-key");
+    QSignalSpy words(translator, &showthis::TranslationService::translated);
+    QSignalSpy contexts(translator, &showthis::TranslationService::context_translated);
+    service.translate("Haus", "Das Haus");
+    auto word = network.last_reply;
+    service.translate_context("Das Haus");
+    auto context = network.last_reply;
+    const auto payload = QJsonDocument::fromJson(network.payloads[1]).object();
+    QCOMPARE(payload.value("source_lang").toString(), QString("DE"));
+    QCOMPARE(payload.value("target_lang").toString(), QString("EN"));
+    QCOMPARE(payload.value("text").toArray(), QJsonArray{"Das Haus"});
+    QVERIFY(payload.value("context").toString().isEmpty());
+    QVERIFY(translator->word_busy());
+    QVERIFY(translator->context_busy());
+    if (change == "source") service.set_source_language("fr");
+    else if (change == "target") service.set_target_language("uk");
+    else if (change == "draft") service.prepare_draft({}, true);
+    else service.clear();
+    QVERIFY(!translator->busy());
+    QVERIFY(word->isFinished());
+    QVERIFY(context->isFinished());
+    QMetaObject::invokeMethod(word, "finished", Qt::DirectConnection);
+    QMetaObject::invokeMethod(context, "finished", Qt::DirectConnection);
+    QCOMPARE(words.size(), 0);
+    QCOMPARE(contexts.size(), 0);
+    QVERIFY(translator->text().isEmpty());
+    QVERIFY(translator->context_text().isEmpty());
+    QVERIFY(translator->word_error().isEmpty());
+    QVERIFY(translator->context_error().isEmpty());
+    QCOMPARE(network.requests.size(), 2);
+}
+
+void LearningServiceTest::manual_context_translation_round_trip() {
+    QTemporaryDir directory;
+    const auto path = directory.filePath("words.json");
+    const QString context = "<source>\nDas ist mein Haus.";
+    const QString translated = "Only passage translation <translated> & \"quoted\"\tend\nSecond line";
+    const QJsonObject legacy{{"id", "legacy"}, {"word", "Haus"}, {"language", "de"},
+        {"context", context}, {"created", "2026-01-01"}, {"custom_card", QJsonObject{{"preserved", true}}}};
+    QFile notebook(path);
+    QVERIFY(notebook.open(QIODevice::WriteOnly));
+    notebook.write(QJsonDocument(QJsonObject{{"version", 1}, {"cards", QJsonArray{legacy}},
+        {"dictionary_cache", QJsonObject{}}, {"custom_root", "preserved"}}).toJson());
+    notebook.close();
+    QByteArray saved_bytes;
+    {
+        TestNetwork network;
+        showthis::LearningService service(nullptr, path, &network);
+        service.set_source_language("de");
+        service.set_target_language("en");
+        QVERIFY(!service.translator()->configured());
+        QCOMPARE(service.vocabulary().size(), 1);
+        QVERIFY(service.vocabulary()[0].toMap().value("context_translation").toString().isEmpty());
+        QVERIFY(!service.save_word({}, "Haus", context, "  ", "", "", "", {}));
+        QVERIFY(service.message().contains("context translation"));
+        QVERIFY(!service.save_word({}, "", context, translated, "", "", "", {}));
+        QVERIFY(service.save_word({}, "Baum", "Ein Baum.", "A tree.", "", "", "", {}));
+        QVERIFY(service.save_word("legacy", "Haus", context, translated, "", "", "manual note", {}));
+        QCOMPARE(service.vocabulary().size(), 2);
+        service.vocabulary_model()->set_filter("Only passage translation");
+        QCOMPARE(service.vocabulary_model()->rowCount(), 1);
+        QCOMPARE(service.vocabulary_model()->visible_ids(), QStringList{"legacy"});
+        QVERIFY(network.requests.isEmpty());
+        QVERIFY(notebook.open(QIODevice::ReadOnly));
+        saved_bytes = notebook.readAll();
+        notebook.close();
+    }
+    TestNetwork network;
+    showthis::LearningService reopened(nullptr, path, &network);
+    QCOMPARE(reopened.vocabulary().size(), 2);
+    QVariantMap card;
+    for (const auto &value : reopened.vocabulary())
+        if (value.toMap().value("id").toString() == "legacy") card = value.toMap();
+    QCOMPARE(card.value("context").toString(), context);
+    QCOMPARE(card.value("context_translation").toString(), translated);
+    QVERIFY(card.value("translation").toString().isEmpty());
+    QVERIFY(card.value("meaning").toString().isEmpty());
+    QCOMPARE(card.value("notes").toString(), QString("manual note"));
+    QCOMPARE(card.value("created").toString(), QString("2026-01-01"));
+    QCOMPARE(QJsonObject::fromVariantMap(card.value("custom_card").toMap()), legacy.value("custom_card").toObject());
+    const auto document = QJsonDocument::fromJson(saved_bytes).object();
+    QCOMPARE(document.value("custom_root").toString(), QString("preserved"));
+    const auto destination = directory.filePath("anki.txt");
+    QVERIFY(reopened.export_anki(QUrl::fromLocalFile(destination), {"legacy"}));
+    QFile exported(destination);
+    QVERIFY(exported.open(QIODevice::ReadOnly));
+    const auto bytes = exported.readAll();
+    QVERIFY(bytes.contains("Context translation: Only passage translation &lt;translated&gt; &amp; &quot;quoted&quot;&#9;end<br>Second line"));
+    QVERIFY(bytes.contains("&lt;source&gt;<br>Das ist mein Haus."));
+    QVERIFY(!bytes.contains("<translated>"));
+    QCOMPARE(bytes.count('\n'), 5);
+    QVERIFY(notebook.open(QIODevice::ReadOnly));
+    QCOMPARE(notebook.readAll(), saved_bytes); // Export never rewrites the notebook.
+    QVERIFY(network.requests.isEmpty());
 }

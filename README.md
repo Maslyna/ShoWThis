@@ -29,16 +29,29 @@ Keep the build/install prefix consistent: its executable path is embedded in
 the desktop entry. System Qt plugins and the above runtime dependencies must
 remain installed; this is not a self-contained portable bundle.
 
-Use **Ctrl+Alt+Space** for the overlay. If portal permission is denied or setup
-fails, the tray menu provides **Capture screen**, **My vocabulary**, and **Retry
-shortcut setup**. Retry opens shortcut configuration on version-2 portals;
-older portals provide directions to KDE's shortcut settings. Setup is ready only
-when the overlay action has an assigned trigger. Launching a second instance
-opens the running notebook.
+Use **Ctrl+Alt+Space** for the capture overlay. The tray provides **Capture screen**,
+**My vocabulary**, **Translator**, and **Retry shortcut setup**. Notebook and
+translator are movable, resizable dialogs inside the layer-shell overlay.
+Retry opens shortcut configuration on version-2 portals; older portals provide
+directions to KDE's shortcut settings. Setup is ready only when the overlay action
+has an assigned trigger. Launching a second instance opens the running notebook.
+
+## Word workspace
+
+Context is editable directly under the word. The **Translate** buttons beside the
+word and context open the independent translator with that text; opening it does
+not send a request. **New word** and the standalone **Translator** action are in
+the notebook's top toolbar. Move or close a dialog with its header; resize from
+the bottom-right corner. Closing the notebook keeps its draft while ShoWThis runs.
+
+Desktop dictionary/card panes have a draggable divider. Compact layouts use
+**Dictionary / My word card** tabs. Dictionary language controls affect lookup,
+not the independent translator. Translation language selectors live only in the
+translator dialog.
 
 ## Selecting context
 
-After choosing a word, click **Select context** beside its context field.
+After choosing a word, click **Select** beside the context directly underneath it.
 Drag a rectangle around the words you want; draw more rectangles to add other
 passages. Click individual words to include or exclude them. Only words whose
 centres fall inside a rectangle are added, and overlapping selections never
@@ -56,12 +69,25 @@ disabled. A new screenshot or OCR result cancels a pending selection safely.
 
 ## Translation
 
-Select **LibreTranslate** in **Settings → Translation** to use a separately
-running local or self-hosted server. The default **Server URL** is
-`http://127.0.0.1:5000`. Apply a different base URL if needed, including any
-hosting prefix but not `/translate`. The API key is optional and session-only.
-Only pressing **Translate with LibreTranslate** sends the word; the context
-is not sent or substituted for the word.
+Open **Translator** from the notebook toolbar or tray to translate arbitrary text,
+even without a selected card. Choose source/target languages, optionally swap them,
+and press **Translate** (or **Ctrl+Enter**). Results are editable and copying is
+explicit. Both dialogs remain interactive; closing one leaves the other open.
+They open side by side when space permits and remember manually adjusted geometry.
+
+To keep text, choose a destination field and **Add result**, or **Add source to
+context**. These append to the currently selected card's draft, never overwrite or
+autosave it. The target card is named in the translator. Use **Save word** in the
+notebook to persist the additions. Provider requests never auto-apply to a card.
+
+Dropdowns support keyboard search: type part of a name or language code, use
+Up/Down to navigate matches, Enter to select, and Escape to cancel. Language
+selectors also accept regional codes such as `pt-BR` when supported by the provider.
+
+Choose **LibreTranslate** and **Setup**, or use **Settings → Translation**, for a
+local/self-hosted server. Its default base URL is `http://127.0.0.1:5000`; include any
+hosting prefix but not `/translate`. API keys are optional and session-only.
+**Configured · not checked** does not mean a local server has finished loading models.
 
 Install/start the service and its language models using the
 [LibreTranslate installation guide](https://docs.libretranslate.com/guides/installation/).

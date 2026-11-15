@@ -164,6 +164,7 @@ bool LearningService::configure_dictionaries(const QVariantList &selection, bool
 }
 
 void LearningService::prepare_draft(const QVariantMap &configuration, bool use_defaults) {
+    m_translator->clear();
     // Viewing a saved card/history item is not an edit to application defaults.
     m_transient_preferences = true;
     auto source = dictionary_language_code(m_settings.value("learning/source_language", "en").toString());
@@ -334,6 +335,11 @@ void LearningService::translate(const QString &word, const QString &context) {
     m_translator->translate(word, context, m_source_language, m_target_language);
 }
 
+void LearningService::translate_context(const QString &text) {
+    set_message({});
+    m_translator->translate_context(text, m_source_language, m_target_language);
+}
+
 KaikkiOfflineStore *LearningService::offline_dictionaries() const {
     return qobject_cast<KaikkiOfflineStore *>(m_dictionary->settings("kaikki"));
 }
@@ -361,15 +367,16 @@ void LearningService::trim_cache(QVariantList &history, QJsonObject &cache, int 
 }
 
 bool LearningService::save_word(const QString &id, const QString &word, const QString &context,
-                               const QString &meaning, const QString &translation,
+                               const QString &context_translation, const QString &meaning, const QString &translation,
                                 const QString &notes, const QVariantMap &selected_sense, const QString &article,
                                 const QVariantMap &word_forms) {
     if (article.trimmed().size() > 80 || article.contains('\n') || article.contains('\r') || article.contains('\t')) {
         set_message(tr("Keep the optional word prefix to one line, at most 80 characters."));
         return false;
     }
-    if (word.trimmed().isEmpty() || (meaning.trimmed().isEmpty() && translation.trimmed().isEmpty())) {
-        set_message(tr("Enter a word and at least a meaning or translation before saving."));
+    if (word.trimmed().isEmpty() || (meaning.trimmed().isEmpty() && translation.trimmed().isEmpty()
+            && context_translation.trimmed().isEmpty())) {
+        set_message(tr("Enter a word and at least a meaning, word translation, or context translation before saving."));
         return false;
     }
     auto cards = m_cards;
@@ -389,7 +396,7 @@ bool LearningService::save_word(const QString &id, const QString &word, const QS
     auto card = old;
     const QVariantMap fields{{"id", existing >= 0 ? id : QUuid::createUuid().toString(QUuid::WithoutBraces)},
         {"word", word.trimmed()}, {"language", m_source_language}, {"target_language", m_target_language},
-        {"context", context.trimmed()}, {"meaning", meaning.trimmed()},
+        {"context", context.trimmed()}, {"context_translation", context_translation.trimmed()}, {"meaning", meaning.trimmed()},
         {"translation", translation.trimmed()}, {"notes", notes.trimmed()}, {"updated", timestamp},
         {"dictionary_selection", dictionary_selection()}, {"follow_forms", follow_forms()},
         {"created", existing >= 0 ? cards[existing].toMap().value("created").toString() : timestamp}};

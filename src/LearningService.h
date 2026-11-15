@@ -74,8 +74,9 @@ public:
     Q_INVOKABLE bool lookup_history(const QString &key);
     Q_INVOKABLE bool flush_cache() { return m_lookup_cache.flush(); }
     Q_INVOKABLE void translate(const QString &word, const QString &context);
+    Q_INVOKABLE void translate_context(const QString &text);
     Q_INVOKABLE bool save_word(const QString &id, const QString &word, const QString &context,
-                             const QString &meaning, const QString &translation,
+                             const QString &context_translation, const QString &meaning, const QString &translation,
                              const QString &notes, const QVariantMap &selected_sense,
                               const QString &article = QStringLiteral("auto"),
                               const QVariantMap &word_forms = {});

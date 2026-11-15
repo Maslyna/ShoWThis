@@ -25,11 +25,13 @@ TranslationService::TranslationService(QObject *parent, QNetworkAccessManager *n
 }
 
 TranslationService::~TranslationService() {
-    cancel_pending();
+    cancel_pending(m_word);
+    cancel_pending(m_context);
+    cancel_pending(m_session);
 }
 
 QVariantList TranslationService::providers() const {
-    QVariantList result{QVariantMap{{"id", ""}, {"name", tr("None (dictionary only)")}}};
+    QVariantList result{QVariantMap{{"id", ""}, {"name", tr("Off (manual translations)")}}};
     for (const auto &provider : m_providers)
         result.append(QVariantMap{{"id", provider->id()}, {"name", provider->name()}});
     return result;
@@ -45,7 +47,7 @@ const TranslationProvider *TranslationService::active_provider() const {
 
 QString TranslationService::provider_name() const {
     const auto *provider = active_provider();
-    return provider ? provider->name() : QString{};
+    return provider ? provider->name() : tr("Off (manual translations)");
 }
 
 QVariantList TranslationService::configuration_fields() const {
@@ -94,7 +96,7 @@ void TranslationService::set_provider_id(const QString &id) {
         emit error_occurred(tr("Unknown translation provider."));
         return;
     }
-    clear();
+    clear_all();
     m_provider_id = id;
     m_settings.setValue("translation/provider", id);
     emit provider_changed();
@@ -121,7 +123,7 @@ void TranslationService::set_option(const QString &key, const QString &value) {
         auto &configuration = m_configurations[m_provider_id];
         if (configuration.value(key).toString() == normalized)
             return;
-        clear();
+        clear_all();
         configuration.insert(key, normalized);
         if (!field.value("secret").toBool())
             m_settings.setValue("translation/" + m_provider_id + "/" + key, normalized);
@@ -131,7 +133,7 @@ void TranslationService::set_option(const QString &key, const QString &value) {
 }
 
 void TranslationService::forget_credentials() {
-    clear();
+    clear_all();
     for (const auto &item : configuration_fields()) {
         const auto field = item.toMap();
         if (field.value("secret").toBool())
@@ -140,52 +142,108 @@ void TranslationService::forget_credentials() {
     emit configuration_changed();
 }
 
-void TranslationService::cancel_pending() {
-    if (m_reply) {
-        auto *reply = m_reply.data();
-        m_reply.clear();
+void TranslationService::cancel_pending(Job &job) {
+    if (job.reply) {
+        auto *reply = job.reply.data();
+        job.reply.clear();
         reply->disconnect(this);
         reply->abort();
         reply->deleteLater();
     }
 }
 
-void TranslationService::clear() {
-    cancel_pending();
-    m_text.clear();
+void TranslationService::reset(Job &job) {
+    cancel_pending(job);
+    job.text.clear();
+    job.error.clear();
+}
+
+void TranslationService::clear_word() {
+    reset(m_word);
     emit state_changed();
+}
+
+void TranslationService::clear_context() {
+    reset(m_context);
+    emit state_changed();
+}
+
+void TranslationService::clear() {
+    reset(m_word);
+    reset(m_context);
+    emit state_changed();
+}
+
+void TranslationService::clear_session() {
+    reset(m_session);
+    emit state_changed();
+}
+
+void TranslationService::clear_all() {
+    reset(m_session);
+    clear();
 }
 
 void TranslationService::translate(const QString &word, const QString &context,
     const QString &source_language, const QString &target_language) {
-    clear();
+    start(m_word, Channel::Word, word, supports_context() ? context : QString{}, source_language, target_language);
+}
+
+void TranslationService::translate_context(const QString &text,
+    const QString &source_language, const QString &target_language) {
+    // A passage is primary input, not a provider's optional word-disambiguation context.
+    start(m_context, Channel::Context, text, {}, source_language, target_language);
+}
+
+void TranslationService::translate_session(const QString &text,
+    const QString &source_language, const QString &target_language) {
+    start(m_session, Channel::Session, text, {}, source_language, target_language);
+}
+
+void TranslationService::start(Job &job, Channel channel, const QString &text, const QString &context,
+    const QString &source_language, const QString &target_language) {
+    reset(job);
     const auto *provider = active_provider();
-    if (!configured() || word.trimmed().isEmpty()) {
-        emit error_occurred(tr("Enter a word and configure a translator in Settings first."));
+    if (!configured() || text.trimmed().isEmpty()) {
+        if (channel == Channel::Word)
+            job.error = tr("Enter a word and configure a translator in Settings first.");
+        else if (channel == Channel::Context)
+            job.error = tr("Enter context and configure a translator in Settings first.");
+        else
+            job.error = tr("Enter text and configure a translator first.");
+        emit state_changed();
+        if (channel != Channel::Session)
+            emit error_occurred(job.error);
         return;
     }
-    auto request = provider->make_request(word, supports_context() ? context : QString{},
-        source_language, target_language, m_configurations.value(m_provider_id));
+    auto request = provider->make_request(text, context, source_language, target_language,
+        m_configurations.value(m_provider_id));
     request.request.setTransferTimeout(15000);
     auto *reply = m_network->sendCustomRequest(request.request, request.method, request.body);
-    m_reply = reply;
-    emit state_changed();
-    connect(reply, &QNetworkReply::finished, this, [this, reply, provider]() {
-        if (m_reply != reply) {
+    job.reply = reply;
+    connect(reply, &QNetworkReply::finished, this, [this, &job, reply, provider, channel]() {
+        if (job.reply != reply) {
             reply->deleteLater();
             return;
         }
-        m_reply.clear();
+        job.reply.clear();
         const auto result = provider->parse_response(reply->readAll(),
             reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt(), reply->error());
         reply->deleteLater();
-        m_text = result.text;
+        job.text = result.text;
+        job.error = result.error;
         emit state_changed();
-        if (!result.error.isEmpty())
-            emit error_occurred(result.error);
+        if (!result.error.isEmpty()) {
+            if (channel != Channel::Session)
+                emit error_occurred(result.error);
+        } else if (channel == Channel::Session)
+            emit session_translated(result.text);
+        else if (channel == Channel::Context)
+            emit context_translated(result.text);
         else
-            emit translated(m_text);
+            emit translated(result.text);
     });
+    emit state_changed();
 }
 
 }  // namespace showthis

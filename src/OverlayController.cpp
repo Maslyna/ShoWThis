@@ -1,7 +1,6 @@
 #include "OverlayController.h"
 
 #include <QDebug>
-#include <QQuickItem>
 #include <QtConcurrent/QtConcurrentRun>
 #include <exception>
 
@@ -58,6 +57,7 @@ void OverlayController::hide_overlay() {
     m_wants_visible = false;
     m_surface.suppress_export_restore();
     m_surface.hide();
+    m_surface.cancel_context_selection();
 }
 
 void OverlayController::show_notebook() {
@@ -65,9 +65,11 @@ void OverlayController::show_notebook() {
         m_surface.raise_export_dialog();
         return;
     }
-    m_wants_visible = true;
-    m_surface.show();
-    QMetaObject::invokeMethod(m_surface.rootObject(), "open_vocabulary");
+    m_surface.open_notebook();
+}
+
+void OverlayController::show_translator() {
+    m_surface.open_translator();
 }
 
 void OverlayController::captured(const QImage &image) {

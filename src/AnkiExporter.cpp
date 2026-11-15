@@ -46,6 +46,9 @@ QString AnkiExporter::format_card(const QVariantMap &card) {
         if (!text.isEmpty())
             back.append(anki_html(text));
     }
+    const auto context_translation = card.value("context_translation").toString();
+    if (!context_translation.isEmpty())
+        back.append(anki_html(QObject::tr("Context translation: %1").arg(context_translation)));
     const auto sense = card.value("sense").toMap();
     const auto pronunciation = sense.value("pronunciation").toString();
     if (!pronunciation.isEmpty())

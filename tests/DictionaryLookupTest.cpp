@@ -579,7 +579,7 @@ private slots:
         service.lookup(word);
         QTRY_VERIFY(!service.dictionary_busy());
         QCOMPARE(service.senses().size(), 2);
-        QVERIFY(service.save_word({}, "Haus", "der Häuser", QString::fromUtf8("дом"), "", "", service.senses()[1].toMap()));
+        QVERIFY(service.save_word({}, "Haus", "der Häuser", "", QString::fromUtf8("дом"), "", "", service.senses()[1].toMap()));
         const auto card = service.vocabulary()[0].toMap();
         QCOMPARE(card.value("word").toString(), QString("Haus"));
         QCOMPARE(card.value("base_form").toString(), QString("Haus"));
@@ -603,16 +603,16 @@ private slots:
         showthis::LearningService reopened(nullptr, directory.filePath("words.json"), &network);
         QCOMPARE(reopened.vocabulary()[0].toMap().value("plural_forms").toStringList(), card.value("plural_forms").toStringList());
         const auto id = card.value("id").toString();
-        QVERIFY(reopened.save_word(id, "Haus", "", "home", "", "note edit", {}));
+        QVERIFY(reopened.save_word(id, "Haus", "", "", "home", "", "note edit", {}));
         QCOMPARE(reopened.vocabulary()[0].toMap().value("base_article").toString(), QString("das"));
         const QVariantMap manual{{"base_form", "house"}, {"base_article", "the"}, {"plural_forms", QStringList{"houses"}}};
-        QVERIFY(reopened.save_word(id, "Haus", "", "home", "", "", {}, "", manual));
+        QVERIFY(reopened.save_word(id, "Haus", "", "", "home", "", "", {}, "", manual));
         QCOMPARE(reopened.vocabulary()[0].toMap().value("base_form").toString(), QString("house"));
         const QVariantMap invalid{{"plural_forms", QStringList{"bad\nform"}}};
-        QVERIFY(!reopened.save_word(id, "Haus", "", "home", "", "", {}, "", invalid));
+        QVERIFY(!reopened.save_word(id, "Haus", "", "", "home", "", "", {}, "", invalid));
         QCOMPARE(reopened.vocabulary()[0].toMap().value("base_form").toString(), QString("house"));
         const QVariantMap clear{{"base_form", ""}, {"base_article", ""}, {"plural_forms", QStringList{}}};
-        QVERIFY(reopened.save_word(id, "Haus", "", "home", "", "", {}, "", clear));
+        QVERIFY(reopened.save_word(id, "Haus", "", "", "home", "", "", {}, "", clear));
         QVERIFY(reopened.vocabulary()[0].toMap().value("base_form").toString().isEmpty());
         QVERIFY(reopened.vocabulary()[0].toMap().value("plural_forms").toStringList().isEmpty());
     }

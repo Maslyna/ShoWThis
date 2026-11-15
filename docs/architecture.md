@@ -6,33 +6,55 @@ edited normally before lookup or saving.
 
 ## UI
 
-- `LearningPanel.qml` owns navigation, confirmations, and the export dialog.
+- `Overlay.qml` hosts notebook and translator dialogs in the existing layer-shell
+  surface. `OverlayDialog.qml` supplies bounded dragging, resizing, focus and
+  stacking without creating native windows. `NotebookDialog.qml` hosts
+  `LearningPanel.qml`, which owns navigation and confirmations; its header contains
+  New word and the standalone Translator action.
 - `NotebookWordEditor.qml` owns the current draft and lookup workflow, including
   a snapshot of the chosen dictionary sense and its attribution. Saving passes
   this snapshot, not an index into mutable lookup results. Refreshing or changing
   sources preserves it; editing the word or its language clears it with the copied
   fields. Loading a card suppresses dirty tracking; opening another card goes
   through the panel's unsaved-change confirmation.
+  Context is editable immediately under the word, with explicit translator launch
+  buttons beside both inputs. The desktop workspace is a resizable `SplitView`;
+  compact screens show Dictionary/Card tabs. There is no context drawer or
+  page-level scroller around both panes.
+- `TranslatorDialog.qml` is an independent, nonmodal item in the same overlay.
+  Its controls and dialog chrome use the system palette. Its source/target
+  language settings remain under `translator_window/`, separately from
+  dictionary/card preferences. Word/context actions seed its input without
+  networking; a separate Translate action sends. Results never auto-apply.
+  Explicit append actions target the currently selected draft through
+  `ShoWSurface` and mark it dirty without saving unrelated edits. Reopening
+  without seed text preserves its input/results and manually adjusted geometry.
+- `SearchableComboBox.qml` keeps stable source-model indices while filtering a
+  virtualized popup. Typing searches display names and values; arrows preview,
+  Enter commits, and Escape cancels before dialog shortcuts. The language picker
+  additionally accepts valid custom language-code syntax.
 - `ContextSelection.qml` owns temporary manual context selection over the current
   screenshot. Rectangle drags add words by box centre; clicks toggle individual
   words. Word indices prevent overlap duplicates without removing repeated text
   at distinct positions. First-selection groups preserve OCR order within each
   rectangle and selection order between rectangles; re-including a word restores
   its original group position. A movable panel previews the combined text.
-  `Overlay.qml` disables ordinary word actions during selection and restores the
-  unchanged notebook on cancel. Only acceptance updates the draft context.
+  `Overlay.qml` temporarily hides both dialogs during selection and restores
+  their visibility/focus afterward. Only acceptance updates the notebook context.
   Replacing the image/words, starting OCR, or hiding the window cancels selection;
   resizing preserves committed selections but abandons an in-flight drag.
-- `NotebookDictionary.qml` displays dictionary results.
+- `NotebookDictionary.qml` displays dictionary results and owns source selection
+  within its pane rather than consuming space in the word toolbar.
 - Anki export uses Qt's standard `QFileDialog`, with native dialogs enabled.
-  `ShoWSurface` hides the layer-shell overlay and releases keyboard focus before
-  opening an unparented save dialog, then restores the unchanged notebook after
-  saving or cancelling. `OverlayController` prevents shortcuts or the tray from
-  reopening the overlay over the dialog. There is no custom file browser.
+  The overlay temporarily hides to release its exclusive keyboard grab while the
+  application-modal save dialog is open. Capture shortcuts respect that dialog;
+  closing it restores the latest requested overlay state. There is no custom browser.
 - `NotebookDictionaryOptions.qml` shows a compact source summary and a staged
   Apply/Cancel picker. `NotebookDictionarySource.qml` renders each registered
   source's languages and fallback role from metadata.
-- `NotebookCardEditor.qml` edits the personal meaning, translation, prefix, and notes.
+- `NotebookCardEditor.qml` edits meaning, manual word/context translations, prefix,
+  forms and notes. Translation language selection and machine results are confined
+  to the independent translator; only explicit Add actions copy machine results into a card.
 - `NotebookVocabulary.qml` owns saved-word search and export selection.
 - `NotebookHistory.qml` displays and searches recent lookups.
 - `NotebookSettings.qml` contains history, translation, and storage settings.
@@ -125,8 +147,13 @@ is selected by default. DeepL requires an API key. LibreTranslate defaults to
 Its base URL supports hosting prefixes; the provider appends `/translate`.
 The separately installed LibreTranslate service owns its runtime and models;
 ShoWThis does not start it, download models, or add an embedded Python runtime.
-LibreTranslate sends JSON with the selected word and language codes, never the
-separate context. URL options reject credentials, queries, fragments, non-HTTP(S)
+Word/context card jobs and the independent session have separate cancellation,
+results and errors. Notebook draft/language changes clear only card jobs; they
+cannot interrupt the standalone session or block saving. Provider/configuration/
+credential changes clear every job. The session sends its primary text with empty
+auxiliary context for every provider. The optional `context_translation` card
+field remains validated, persisted, searchable and exported.
+URL options reject credentials, queries, fragments, non-HTTP(S)
 schemes, and malformed addresses before persistence. Same-origin redirect policy
 prevents forwarding the word or optional key to another server.
 
@@ -151,14 +178,13 @@ To add a translator:
 4. Register the implementation in `TranslationProviders.cpp` and add its sources
    to `showthis_core`. Generic settings and word-card UI need no changes.
 
-Changing a provider, its settings, credentials, word language, or target language
-cancels an outstanding translation and clears its result. Configuring a provider
-never sends text: only the explicit Translate action does. Provider configuration
-changes do not clear the word card's translation: it is user data, independent of
-the provider and its session-only credentials. Existing translations survive
-restarts and note-only edits without configuring a translator. Selecting another
-dictionary sense cancels any pending translation before replacing the draft's
-meaning and dictionary-supplied translation.
+Changing provider settings or credentials cancels outstanding jobs. Changing the
+translator dialog's source or target language cancels its session; editing or
+switching notebook cards does not. Configuring or opening a translator never sends
+text: only Translate does. Personal translations survive provider changes and
+restarts. Appending translated text explicitly updates the card target language;
+source/context/notes additions do not. The original input and previous field text
+remain intact.
 
 ## Build and tests
 

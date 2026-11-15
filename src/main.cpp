@@ -100,6 +100,9 @@ int main(int argc, char *argv[]) {
     QAction *vocabulary_action = menu.addAction("My vocabulary");
     QObject::connect(vocabulary_action, &QAction::triggered,
         &controller, &showthis::OverlayController::show_notebook);
+    QAction *translator_action = menu.addAction("Translator");
+    QObject::connect(translator_action, &QAction::triggered,
+        &controller, &showthis::OverlayController::show_translator);
     QAction *quitAction = menu.addAction("Quit");
 
     QObject::connect(quitAction, &QAction::triggered, &app, &QApplication::quit);

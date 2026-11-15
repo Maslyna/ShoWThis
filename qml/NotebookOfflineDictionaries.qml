@@ -15,12 +15,12 @@ NotebookSurface {
         spacing: 10
         Label { text: qsTr("Offline dictionaries"); font.pixelSize: 17; font.bold: true }
         Label {
-            text: qsTr("Choose the language of the words and the language you want definitions in. Kaikki downloads are edition-wide, but only the selected word language is kept in your local index. Downloads can be several GB.")
+            text: qsTr("Download Kaikki definitions for offline lookup. Choose the word language and the language of the definitions.")
             wrapMode: Text.WordWrap
             opacity: 0.7
             Layout.fillWidth: true
         }
-        Label { text: qsTr("Word language — what are you looking up?"); font.pixelSize: 12 }
+        Label { text: qsTr("Word language"); font.pixelSize: 12; font.bold: true }
         NotebookLanguagePicker {
             objectName: "offline_dictionary_word_language"
             options: [{code: "", name: qsTr("All word languages")}].concat(Array.from(settings.service.language_options))
@@ -32,10 +32,10 @@ NotebookSurface {
                 settings.word_language = settings.manager.normalize_word_language(code) || code
             }
         }
-        Label { text: qsTr("Definitions in — which language do you read?"); font.pixelSize: 12 }
+        Label { text: qsTr("Definition language"); font.pixelSize: 12; font.bold: true }
         RowLayout {
             Layout.fillWidth: true
-            ComboBox {
+            SearchableComboBox {
                 id: edition
                 objectName: "offline_dictionary_edition"
                 model: settings.manager.editions
@@ -56,7 +56,7 @@ NotebookSurface {
         Label {
             visible: settings.manager.download_info.edition === edition.currentValue
                 && settings.manager.download_info.word_language === settings.word_language
-            text: qsTr("Compressed download: %1. The indexed dictionary and temporary files need extra space.")
+            text: qsTr("Compressed download: %1. Full editions can be several GB; indexing needs extra space. Only the selected word language is kept.")
                 .arg(settings.manager.download_info.size_text || "")
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
@@ -90,8 +90,8 @@ NotebookSurface {
             text: qsTr("Cancel")
             onClicked: settings.manager.cancel()
         }
-        Label { text: qsTr("When to use downloaded Kaikki data"); font.pixelSize: 12 }
-        ComboBox {
+        Label { text: qsTr("Use downloaded definitions"); font.pixelSize: 12; font.bold: true }
+        SearchableComboBox {
             objectName: "offline_dictionary_mode"
             model: [
                 {code: "fallback", name: qsTr("When online lookup cannot connect")},
@@ -107,10 +107,16 @@ NotebookSurface {
             onActivated: settings.manager.mode = currentValue
         }
         Label {
-            text: qsTr("For lookup, choose this word language in the word editor, and Kaikki with the matching definition language in Sources & languages. Other selected sources may still use the internet.")
+            text: qsTr("For lookup, select the matching word language and Kaikki definition language in Sources & languages. Other sources may still go online.")
             font.pixelSize: 11
             opacity: 0.65
             wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        Label {
+            text: qsTr("Installed dictionaries")
+            visible: settings.manager.packs.length > 0
+            font.bold: true
             Layout.fillWidth: true
         }
         Repeater {

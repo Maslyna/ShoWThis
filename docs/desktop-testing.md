@@ -14,6 +14,12 @@ surface: additive/reversed rectangles, word toggles, overlap deduplication,
 selection ordering, saving, cancel/Escape, stale-image cancellation, scaling,
 resizing, and movable preview controls. Optional `SHOWTHIS_TEST_SCREENSHOTS`
 captures desktop, compact, and small-screen context-picker views.
+Workspace tests cover the in-overlay notebook, inline context, divider dragging,
+compact Dictionary/Card geometry, screenshot-selection round trips, and preserved
+drafts. `TranslatorDialogTest` covers standalone operation in the same surface,
+dialog movement/resizing/focus, system palettes, explicit append/save and credentials.
+`LanguagePickerTest` covers typed filtering, arrows/Enter/Escape, regional codes,
+stable model indices and a virtualized long language list.
 
 OCR uses a 15-second recognition deadline and cooperative shutdown cancellation.
 Cancellation is checked before recognition and by Tesseract's progress monitor.
@@ -30,7 +36,7 @@ compositor permissions, keyboard grabs, or display geometry.
    Confirm the global-shortcut permission prompt and bind Ctrl+Alt+Space.
 2. Capture recognizable text on each monitor, including mixed scaling. Check
    screenshot/word-outline alignment and that the active monitor is used.
-   Select a word, then **Select context**. Add several rectangles and toggle
+   Select a word, then **Select** beside its inline context. Add rectangles and toggle
    individual words; verify highlights match the preview with no overlap
    duplicates. Move the preview panel to select text underneath it. Apply and
    save, then reopen the card to verify its context. Cancel/Esc must preserve
@@ -49,8 +55,18 @@ compositor permissions, keyboard grabs, or display geometry.
    **System Settings > Keyboard > Shortcuts > ShoWThis** and retain tray capture.
    Separately restart the portal service: automatic recovery must not open
    configuration or start another application instance.
-5. Open the Anki save dialog: the exclusive overlay must hide, normal keyboard
-   focus must return, and accepting/cancelling must restore the notebook.
+5. Open the notebook and Translator inside the layer-shell overlay. Confirm no
+   separate desktop windows appear. Drag either header and resize from its
+   bottom-right corner; verify geometry stays within the screen and survives
+   reopening. Both dialogs must remain interactive, with side-by-side initial
+   placement where space permits. Confirm translator colors follow the desktop
+   palette. Translate independently, switch cards, then explicitly add source/result
+   text; only the named card draft changes and Save is still required.
+   Search language dropdowns by typing; Escape must cancel the popup before closing
+   its dialog. Close either dialog without closing its peer. Select screenshot
+   context: both dialogs temporarily hide, then return without losing the standalone
+   session. Open Anki export: the overlay must hide while the standard save dialog
+   owns keyboard focus, then restore unless explicitly dismissed in the meantime.
 6. Remove/disable OCR language data in an isolated test environment. The notebook
    must still open and attempted OCR must report how to install/select data.
 7. Test a fresh user profile with QSQLITE and all required runtime plugins

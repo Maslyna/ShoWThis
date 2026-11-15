@@ -14,6 +14,7 @@ NotebookSurface {
     signal sense_selected(int index)
     signal manual_meaning_requested()
     signal headword_requested(string word)
+    signal sources_changed()
     objectName: "dictionary_pane"
 
     ColumnLayout {
@@ -22,6 +23,10 @@ NotebookSurface {
         RowLayout {
             Layout.fillWidth: true
             Label { text: qsTr("Dictionary"); font.pixelSize: 17; font.bold: true; Layout.fillWidth: true }
+        }
+        NotebookDictionaryOptions {
+            service: dictionary.service
+            onChanged: dictionary.sources_changed()
         }
         Item {
             Layout.fillWidth: true

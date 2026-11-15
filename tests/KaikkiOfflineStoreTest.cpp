@@ -298,7 +298,7 @@ private slots:
         service.lookup("Haus");
         QTRY_VERIFY(!service.dictionary_busy());
         QCOMPARE(service.senses().size(), 1);
-        QVERIFY(service.save_word({}, "Haus", "", QString::fromUtf8("дом"), "", "", service.senses()[0].toMap()));
+        QVERIFY(service.save_word({}, "Haus", "", "", QString::fromUtf8("дом"), "", "", service.senses()[0].toMap()));
         serve_download(network, kaikki_entry("Haus", "updated meaning"));
         QVERIFY(install(*store));
         service.lookup("Haus");

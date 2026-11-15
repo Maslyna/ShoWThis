@@ -10,7 +10,7 @@ QVariantList LibreTranslateTranslator::configuration_fields() const {
     return {
         QVariantMap{{"key", "base_url"}, {"label", QObject::tr("Server URL")}, {"required", true},
             {"default_value", "http://127.0.0.1:5000"},
-            {"description", QObject::tr("Run LibreTranslate separately. Use its base URL, including any hosting prefix, not /translate. HTTP is unencrypted; use HTTPS for remote servers.")}},
+            {"description", QObject::tr("Start LibreTranslate separately. On first startup it may download language models for several minutes before the server accepts requests. Use the server base URL, including any hosting prefix, without /translate. For remote servers use HTTPS; HTTP is unencrypted.")}},
         QVariantMap{{"key", "api_key"}, {"label", QObject::tr("API key (optional)")}, {"secret", true}}
     };
 }

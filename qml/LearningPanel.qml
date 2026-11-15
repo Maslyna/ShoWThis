@@ -7,15 +7,18 @@ Pane {
     required property var service
     signal export_requested(var ids)
     signal context_selection_requested()
+    signal translator_requested(string text, string field)
     property bool context_selection_available: false
+    property bool shortcuts_enabled: activeFocus
     property var export_ids: []
     property var pending_action: ({})
     property alias card_id: word_editor.card_id
     property alias dirty: word_editor.dirty
     property alias compact_page: word_editor.compact_page
     property alias word_prefix: word_editor.word_prefix
+    readonly property string selected_word: word_editor.current_word
     readonly property bool wide_layout: width >= 880
-    readonly property var page_names: [qsTr("Learn a word"), qsTr("Saved words"), qsTr("Recent lookups"), qsTr("Settings")]
+    readonly property var page_names: [qsTr("Word & context"), qsTr("Saved words"), qsTr("Recent lookups"), qsTr("Settings")]
     padding: 0
     visible: false
     focus: visible
@@ -46,6 +49,10 @@ Pane {
         navigation.current_index = 1
         visible = true
     }
+    function open_settings() {
+        navigation.current_index = 3
+        visible = true
+    }
     function edit_card(card) { request_card({card: card}) }
     function request_card(action) {
         visible = true
@@ -63,15 +70,18 @@ Pane {
         export_requested(export_ids)
     }
     function apply_context(text: string) { word_editor.apply_context(text) }
+    function apply_translator_text(field: string, text: string, target_language: string): bool {
+        return word_editor.add_to_card(field, text, target_language)
+    }
 
     Shortcut {
         sequence: "Ctrl+S"
-        enabled: panel.visible && navigation.current_index === 0 && word_editor.can_save && !discard_confirmation.visible
+        enabled: panel.shortcuts_enabled && panel.visible && navigation.current_index === 0 && word_editor.can_save && !discard_confirmation.visible
         onActivated: word_editor.save_card()
     }
     Shortcut {
         sequence: "Ctrl+F"
-        enabled: panel.visible && !discard_confirmation.visible
+        enabled: panel.shortcuts_enabled && panel.visible && navigation.current_index !== 3 && !discard_confirmation.visible
         onActivated: {
             const page = navigation.current_index === 1 ? vocabulary_page
                 : navigation.current_index === 2 ? history_page : word_editor
@@ -142,6 +152,7 @@ Pane {
             RowLayout {
                 Layout.fillWidth: true
                 ColumnLayout {
+                    visible: navigation.current_index !== 0
                     Layout.fillWidth: true
                     spacing: 3
                     Label {
@@ -153,8 +164,9 @@ Pane {
                     }
                     Label {
                         visible: panel.wide_layout
-                        text: [qsTr("Understand it. Make it yours."), qsTr("Your words, with the context that made them memorable."),
-                            qsTr("Pick up where you left off."), qsTr("Make the notebook work for you.")][navigation.current_index]
+                        text: [qsTr("Look up a word, edit its context, and optionally translate either."),
+                            qsTr("Saved words, notes and translations."), qsTr("Reopen a cached lookup without connecting."),
+                            qsTr("Translation services, offline dictionaries and local data.")][navigation.current_index]
                         opacity: 0.6
                         font.pixelSize: 12
                         elide: Text.ElideRight
@@ -168,14 +180,12 @@ Pane {
                     onClicked: panel.open_word("", "")
                 }
                 NotebookButton {
-                    text: "✕"
+                    objectName: "open_translator"
+                    text: qsTr("Translator")
                     quiet: true
-                    objectName: "hide_notebook"
-                    Accessible.name: qsTr("Back to screen")
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("Back to screen · Esc\nYour draft stays open")
-                    onClicked: panel.visible = false
+                    onClicked: panel.translator_requested("", "notes")
                 }
+                Item { visible: navigation.current_index === 0; Layout.fillWidth: true }
             }
             Item {
                 id: navigation
@@ -219,6 +229,8 @@ Pane {
                     wide_layout: panel.wide_layout
                     context_selection_available: panel.context_selection_available
                     onContext_selection_requested: panel.context_selection_requested()
+                    onSettings_requested: panel.open_settings()
+                    onTranslator_requested: function(text, field) { panel.translator_requested(text, field) }
                 }
                 NotebookVocabulary {
                     id: vocabulary_page
@@ -244,7 +256,7 @@ Pane {
                 NotebookSettings { service: panel.service }
             }
             Label {
-                text: panel.service.message || qsTr("Lookup sends only the word to the selected dictionaries. Your notebook is stored locally.")
+                text: panel.service.message || qsTr("Your cards stay local. Translation runs only when you ask.")
                 textFormat: Text.PlainText
                 font.pixelSize: panel.service.message.length > 0 ? 12 : 10
                 opacity: panel.service.message.length > 0 ? 0.8 : 0.55

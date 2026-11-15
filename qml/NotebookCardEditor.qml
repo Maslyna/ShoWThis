@@ -9,7 +9,6 @@ NotebookSurface {
     required property string card_id
     required property bool dirty
     required property bool wide_layout
-    readonly property bool busy: service.dictionary_busy || service.translator.busy
     property alias word_prefix: prefix.text
     property alias base_form: base_input.text
     property alias base_prefix: base_prefix_input.text
@@ -23,10 +22,10 @@ NotebookSurface {
     property string grammar_profile: ""
     property alias meaning: meaning_input.text
     property alias translation: translation_input.text
+    property alias context_translation: context_translation_input.text
+    property bool context_translation_expanded: false
     property alias notes: notes_input.text
     signal edited()
-    signal translation_language_changed()
-    signal translate_requested()
     objectName: "personal_card_pane"
 
     function load(card) {
@@ -34,6 +33,8 @@ NotebookSurface {
         load_forms(card)
         meaning = card.meaning || ""
         translation = card.translation || ""
+        context_translation = card.context_translation || ""
+        context_translation_expanded = context_translation.length > 0
         notes = card.notes || ""
         notes_toggle.checked = notes.length > 0
         scroll.contentItem.contentY = 0
@@ -135,6 +136,58 @@ NotebookSurface {
                     Accessible.name: qsTr("Chosen meaning")
                     onTextChanged: form.edited()
                 }
+                Label {
+                    text: qsTr("Word translation (optional)")
+                    font.bold: true
+                    font.pixelSize: 12
+                    Layout.fillWidth: true
+                }
+                TextArea {
+                    id: translation_input
+                    objectName: "word_translation"
+                    Layout.fillWidth: true
+                    font.pixelSize: 19
+                    wrapMode: TextEdit.Wrap
+                    textFormat: TextEdit.PlainText
+                    selectByMouse: true
+                    placeholderText: qsTr("Type a translation, or add one from Translator.")
+                    Accessible.name: qsTr("Word translation (optional)")
+                    onTextChanged: form.edited()
+                }
+                NotebookButton {
+                    objectName: "add_context_translation"
+                    visible: !form.context_translation_expanded
+                    text: qsTr("Add context translation")
+                    quiet: true
+                    align_left: true
+                    Layout.fillWidth: true
+                    onClicked: {
+                        form.context_translation_expanded = true
+                        context_translation_input.forceActiveFocus()
+                    }
+                }
+                Label {
+                    visible: form.context_translation_expanded
+                    text: qsTr("Context translation (optional)")
+                    font.bold: true
+                    font.pixelSize: 12
+                    Layout.fillWidth: true
+                }
+                TextArea {
+                    id: context_translation_input
+                    objectName: "context_translation"
+                    visible: form.context_translation_expanded
+                    Layout.fillWidth: true
+                    wrapMode: TextEdit.Wrap
+                    textFormat: TextEdit.PlainText
+                    selectByMouse: true
+                    placeholderText: qsTr("Type a context translation, or add one from Translator.")
+                    Accessible.name: qsTr("Context translation (optional)")
+                    onTextChanged: {
+                        if (text.length > 0) form.context_translation_expanded = true
+                        form.edited()
+                    }
+                }
                 NotebookButton {
                     id: forms_toggle
                     objectName: "toggle_word_forms"
@@ -201,50 +254,6 @@ NotebookSurface {
                         }
                     }
                 }
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: qsTr("Translation"); font.bold: true; font.pixelSize: 12; Layout.fillWidth: true }
-                    NotebookLanguagePicker {
-                        objectName: "target_language"
-                        options: form.service.language_options
-                        language_code: form.service.target_language
-                        Layout.preferredWidth: 125
-                        enabled: !form.busy
-                        Accessible.name: qsTr("Translation language")
-                        onLanguage_selected: function(code) {
-                            const previous = form.service.target_language
-                            form.service.target_language = code
-                            if (form.service.target_language !== previous) form.translation_language_changed()
-                        }
-                    }
-                }
-                TextArea {
-                    id: translation_input
-                    objectName: "word_translation"
-                    Layout.fillWidth: true
-                    font.pixelSize: 19
-                    wrapMode: TextEdit.Wrap
-                    textFormat: TextEdit.PlainText
-                    selectByMouse: true
-                    enabled: !form.service.translator.busy
-                    placeholderText: qsTr("A translation in your language…")
-                    Accessible.name: qsTr("Word translation")
-                    onTextChanged: form.edited()
-                }
-                NotebookButton {
-                    objectName: "translate_word"
-                    visible: form.service.translator.configured
-                    text: form.service.translator.busy ? qsTr("Translating…")
-                        : qsTr("Translate with %1").arg(form.service.translator.provider_name)
-                    quiet: true
-                    Layout.fillWidth: true
-                    enabled: !form.busy && form.word.trim().length > 0
-                    onClicked: form.translate_requested()
-                    ToolTip.visible: hovered
-                    ToolTip.text: form.service.translator.supports_context
-                        ? qsTr("Only clicking Translate sends your word and sentence to %1").arg(form.service.translator.provider_name)
-                        : qsTr("Only clicking Translate sends your word to %1").arg(form.service.translator.provider_name)
-                }
                 NotebookButton {
                     id: notes_toggle
                     text: checked ? qsTr("Notes −") : qsTr("+ Add a note")
@@ -262,7 +271,10 @@ NotebookSurface {
                     selectByMouse: true
                     placeholderText: qsTr("An association, grammar note, or example of your own…")
                     Accessible.name: qsTr("Personal notes")
-                    onTextChanged: form.edited()
+                    onTextChanged: {
+                        if (text.length > 0) notes_toggle.checked = true
+                        form.edited()
+                    }
                 }
             }
         }
