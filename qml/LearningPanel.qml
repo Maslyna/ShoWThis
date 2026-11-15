@@ -6,6 +6,8 @@ Pane {
     id: panel
     required property var service
     signal export_requested(var ids)
+    signal context_selection_requested()
+    property bool context_selection_available: false
     property var export_ids: []
     property var pending_action: ({})
     property alias card_id: word_editor.card_id
@@ -60,6 +62,7 @@ Pane {
         export_ids = ids.slice()
         export_requested(export_ids)
     }
+    function apply_context(text: string) { word_editor.apply_context(text) }
 
     Shortcut {
         sequence: "Ctrl+S"
@@ -214,6 +217,8 @@ Pane {
                     id: word_editor
                     service: panel.service
                     wide_layout: panel.wide_layout
+                    context_selection_available: panel.context_selection_available
+                    onContext_selection_requested: panel.context_selection_requested()
                 }
                 NotebookVocabulary {
                     id: vocabulary_page

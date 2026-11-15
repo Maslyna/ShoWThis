@@ -67,12 +67,15 @@ QVariantMap TranslationService::options() const {
 }
 
 bool TranslationService::configured() const {
-    if (!active_provider())
+    const auto *provider = active_provider();
+    if (!provider)
         return false;
     const auto configuration = m_configurations.value(m_provider_id);
-    for (const auto &value : configuration_fields()) {
+    for (const auto &value : provider->configuration_fields()) {
         const auto field = value.toMap();
-        if (field.value("required").toBool() && configuration.value(field.value("key").toString()).toString().trimmed().isEmpty())
+        const auto key = field.value("key").toString();
+        const auto text = configuration.value(key).toString().trimmed();
+        if ((field.value("required").toBool() && text.isEmpty()) || !provider->option_error(key, text).isEmpty())
             return false;
     }
     return true;
@@ -108,6 +111,11 @@ void TranslationService::set_option(const QString &key, const QString &value) {
         if (!choices.isEmpty() && std::none_of(choices.begin(), choices.end(),
             [&](const QVariant &choice) { return choice.toMap().value("value").toString() == normalized; })) {
             emit error_occurred(tr("Choose a valid value for %1.").arg(field.value("label").toString()));
+            return;
+        }
+        const auto error = active_provider()->option_error(key, normalized);
+        if (!error.isEmpty()) {
+            emit error_occurred(error);
             return;
         }
         auto &configuration = m_configurations[m_provider_id];

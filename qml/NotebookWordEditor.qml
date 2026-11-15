@@ -6,6 +6,8 @@ ColumnLayout {
     id: editor
     required property var service
     required property bool wide_layout
+    property bool context_selection_available: false
+    signal context_selection_requested()
     property string card_id: ""
     property int selected_sense: -1
     property var draft_sense: ({})
@@ -30,6 +32,10 @@ ColumnLayout {
     function focus_search() {
         word_input.forceActiveFocus()
         word_input.selectAll()
+    }
+    function apply_context(text: string) {
+        context_input.text = text
+        context_expanded = true
     }
     function load(action) {
         loading = true
@@ -217,6 +223,7 @@ ColumnLayout {
                     elide: Text.ElideRight
                     opacity: 0.65
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                 }
                 ScrollView {
                     visible: editor.wide_layout || editor.context_expanded
@@ -241,6 +248,17 @@ ColumnLayout {
                     text: editor.context_expanded ? qsTr("Done") : qsTr("Edit")
                     quiet: true
                     onClicked: editor.context_expanded = !editor.context_expanded
+                }
+                NotebookButton {
+                    objectName: "select_context"
+                    text: qsTr("Select context")
+                    quiet: true
+                    enabled: editor.context_selection_available && !editor.busy
+                    onClicked: editor.context_selection_requested()
+                    ToolTip.visible: hovered
+                    ToolTip.text: editor.context_selection_available
+                        ? qsTr("Draw rectangles to add context words; click words to include or exclude them.")
+                        : qsTr("Capture a screen with recognized words to select context.")
                 }
             }
             RowLayout {

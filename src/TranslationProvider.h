@@ -26,9 +26,10 @@ public:
     virtual ~TranslationProvider() = default;
     virtual QString id() const = 0;
     virtual QString name() const = 0;
-    // Fields: key, label, secret, required, default_value, optional choices
+    // Fields: key, label, optional description, secret, required, default_value, optional choices
     // (a list of {value, label}). Credentials must be marked secret.
     virtual QVariantList configuration_fields() const = 0;
+    virtual QString option_error(const QString &, const QString &) const { return {}; }
     virtual bool supports_context() const { return false; }
     virtual TranslationRequest make_request(const QString &word, const QString &context,
         const QString &source_language, const QString &target_language, const QVariantMap &configuration) const = 0;

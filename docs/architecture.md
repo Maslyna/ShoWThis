@@ -13,6 +13,16 @@ edited normally before lookup or saving.
   sources preserves it; editing the word or its language clears it with the copied
   fields. Loading a card suppresses dirty tracking; opening another card goes
   through the panel's unsaved-change confirmation.
+- `ContextSelection.qml` owns temporary manual context selection over the current
+  screenshot. Rectangle drags add words by box centre; clicks toggle individual
+  words. Word indices prevent overlap duplicates without removing repeated text
+  at distinct positions. First-selection groups preserve OCR order within each
+  rectangle and selection order between rectangles; re-including a word restores
+  its original group position. A movable panel previews the combined text.
+  `Overlay.qml` disables ordinary word actions during selection and restores the
+  unchanged notebook on cancel. Only acceptance updates the draft context.
+  Replacing the image/words, starting OCR, or hiding the window cancels selection;
+  resizing preserves committed selections but abandons an in-flight drag.
 - `NotebookDictionary.qml` displays dictionary results.
 - Anki export uses Qt's standard `QFileDialog`, with native dialogs enabled.
   `ShoWSurface` hides the layer-shell overlay and releases keyboard focus before
@@ -108,11 +118,22 @@ History opening uses its exact stored key and never silently starts networking.
 
 ## Optional translators
 
-DeepL is an optional implementation of `TranslationProvider`, not part of the
-dictionary workflow. Select it in **Settings → Translation** and apply an API
-key to enable online translation. Credentials are session-only; provider
-selection and non-secret options are saved under `translation/`. There is no
-migration from the former DeepL-specific settings or environment variable.
+DeepL and LibreTranslate implement `TranslationProvider`, independently of the
+dictionary workflow. Choose either in **Settings → Translation**; no translator
+is selected by default. DeepL requires an API key. LibreTranslate defaults to
+`http://127.0.0.1:5000` and has an optional API key for servers that require one.
+Its base URL supports hosting prefixes; the provider appends `/translate`.
+The separately installed LibreTranslate service owns its runtime and models;
+ShoWThis does not start it, download models, or add an embedded Python runtime.
+LibreTranslate sends JSON with the selected word and language codes, never the
+separate context. URL options reject credentials, queries, fragments, non-HTTP(S)
+schemes, and malformed addresses before persistence. Same-origin redirect policy
+prevents forwarding the word or optional key to another server.
+
+Credentials are session-only; provider selection and non-secret options are
+saved under `translation/`. Changing providers preserves each provider's settings
+within the session. There is no migration from the former DeepL-specific settings
+or environment variable.
 
 To add a translator:
 
@@ -120,7 +141,10 @@ To add a translator:
    descriptors, request construction, and response/error decoding.
 2. Mark credential fields as `secret`. Only non-secret fields are persisted or
    returned to QML. Required fields determine whether translation is configured;
-   providers that need no credentials can expose no fields.
+   providers that need no credentials can expose no fields. Override `option_error`
+   to validate provider-specific option values before saving them and when checking
+   readiness after loading settings. Optional field descriptions appear as help
+   text in the generic settings editor.
 3. Declare whether the provider supports a separate context input. Context is not
    sent to providers that do not support it; the selected word is not silently
    replaced with a full-sentence request.

@@ -18,7 +18,7 @@ NotebookSurface {
             }
         }
         Label {
-            text: qsTr("Word-card translations can be written and edited without a translator. Choose and configure a translator to enable online translation.")
+            text: qsTr("Word-card translations can be written and edited without a translator. Choose and configure a local or hosted translator to enable translation requests.")
             opacity: 0.65
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
@@ -43,6 +43,15 @@ NotebookSurface {
                 readonly property var choices: modelData.choices || []
                 Layout.fillWidth: true
                 Label { text: field.modelData.label; font.bold: true }
+                Label {
+                    text: field.modelData.description || ""
+                    visible: text.length > 0
+                    textFormat: Text.PlainText
+                    wrapMode: Text.WordWrap
+                    opacity: 0.65
+                    font.pixelSize: 12
+                    Layout.fillWidth: true
+                }
                 ComboBox {
                     objectName: "translator_option_" + field.modelData.key
                     visible: field.choices.length > 0

@@ -6,7 +6,9 @@ Item {
     id: root
     focus: true
     Keys.onEscapePressed: function(event) {
-        if (learning_panel.visible) {
+        if (context_selection.active) {
+            context_selection.cancel()
+        } else if (learning_panel.visible) {
             learning_panel.visible = false
             root.forceActiveFocus()
         } else {
@@ -23,6 +25,8 @@ Item {
     property rect hoveredRect: Qt.rect(0, 0, 0, 0)
     readonly property var selectedLanguages: overlay.selectedLanguage.length > 0
         ? overlay.selectedLanguage.split("+") : []
+    readonly property bool context_selection_available: !overlay.scanning
+        && overlay.imageSize.width > 0 && overlay.imageSize.height > 0 && overlay.words.length > 0
 
     function bounded(value: real, maximum: real): real {
         return Math.max(12, Math.min(value, Math.max(12, maximum)))
@@ -38,7 +42,16 @@ Item {
     }
 
     function open_vocabulary() {
+        context_selection.cancel()
         learning_panel.open_vocabulary()
+    }
+
+    function begin_context_selection() {
+        if (!context_selection_available) return
+        root.clearHover()
+        languagePopup.close()
+        learning_panel.visible = false
+        context_selection.begin()
     }
 
     function languageLabel(code: string): string {
@@ -53,10 +66,18 @@ Item {
 
     Connections {
         target: overlay
-        function onWordsChanged() { root.clearHover() }
+        function onWordsChanged() {
+            root.clearHover()
+            context_selection.cancel()
+        }
+        function onImageChanged() { context_selection.cancel() }
+        function onScanningChanged() {
+            if (overlay.scanning) context_selection.cancel()
+        }
         function onVisibleChanged() {
             root.clearHover()
             languagePopup.close()
+            if (!overlay.visible) context_selection.cancel()
             if (overlay.visible) root.forceActiveFocus()
         }
     }
@@ -96,6 +117,7 @@ Item {
             radius: 2
 
             TapHandler {
+                enabled: !context_selection.active
                 onTapped: {
                     root.clearHover()
                     learning_panel.open_word(wordBox.modelData.text, wordBox.modelData.context || "")
@@ -104,6 +126,7 @@ Item {
 
             HoverHandler {
                 id: hover
+                enabled: !context_selection.active
                 onHoveredChanged: {
                     if (hovered) {
                         root.hoveredRect = Qt.rect(wordBox.x, wordBox.y, wordBox.width, wordBox.height)
@@ -120,7 +143,7 @@ Item {
     Rectangle {
         id: wordPopup
         objectName: "wordPopup"
-        visible: root.hoveredWord.length > 0 && !learning_panel.visible
+        visible: root.hoveredWord.length > 0 && !learning_panel.visible && !context_selection.active
         z: 1
         width: Math.min(root.width, 360, popupText.implicitWidth + 24)
         height: popupText.implicitHeight + 20
@@ -149,7 +172,7 @@ Item {
     Rectangle {
         id: toolbar
         objectName: "toolbar"
-        visible: !learning_panel.visible
+        visible: !learning_panel.visible && !context_selection.active
         z: 2
         property bool moved: false
         property real freeX: 0
@@ -414,10 +437,30 @@ Item {
     LearningPanel {
         id: learning_panel
         service: learning
+        context_selection_available: root.context_selection_available
+        onContext_selection_requested: root.begin_context_selection()
         onExport_requested: function(ids) { overlay.export_vocabulary(ids) }
         z: 3
         anchors.centerIn: parent
         width: Math.max(0, Math.min(1120, root.width - 32))
         height: Math.max(0, Math.min(820, root.height - 32))
+    }
+
+    ContextSelection {
+        id: context_selection
+        z: 4
+        anchors.fill: parent
+        words: overlay.words
+        scale_x: root.scaleX
+        scale_y: root.scaleY
+        onAccepted: function(text) {
+            learning_panel.apply_context(text)
+            learning_panel.visible = true
+            root.forceActiveFocus()
+        }
+        onCancelled: {
+            learning_panel.visible = true
+            root.forceActiveFocus()
+        }
     }
 }

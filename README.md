@@ -2,8 +2,8 @@
 
 A screen-based language notebook for **KDE Plasma on Wayland**. Capture the
 active screen, select recognized words, consult dictionaries, keep personal word
-cards, and export them to Anki. DeepL and downloadable Kaikki editions are
-optional; credentials are session-only.
+cards, and export them to Anki. DeepL, local/self-hosted LibreTranslate, and
+downloadable Kaikki editions are optional; credentials are session-only.
 
 ## Build and install
 
@@ -35,6 +35,40 @@ shortcut setup**. Retry opens shortcut configuration on version-2 portals;
 older portals provide directions to KDE's shortcut settings. Setup is ready only
 when the overlay action has an assigned trigger. Launching a second instance
 opens the running notebook.
+
+## Selecting context
+
+After choosing a word, click **Select context** beside its context field.
+Drag a rectangle around the words you want; draw more rectangles to add other
+passages. Click individual words to include or exclude them. Only words whose
+centres fall inside a rectangle are added, and overlapping selections never
+duplicate a word.
+
+The preview keeps OCR reading order within each selection and separates
+selections with newlines in selection order. Click **Use context** to apply it,
+or **Cancel** / **Esc** to keep the original draft. **Clear** starts over; drag
+the preview panel's header to reach text underneath it. The applied text remains
+editable in the notebook.
+
+Selection uses the current screenshot's recognized words, without recapturing,
+rerunning OCR, or contacting a service. Capture a screen first if the button is
+disabled. A new screenshot or OCR result cancels a pending selection safely.
+
+## Translation
+
+Select **LibreTranslate** in **Settings → Translation** to use a separately
+running local or self-hosted server. The default **Server URL** is
+`http://127.0.0.1:5000`. Apply a different base URL if needed, including any
+hosting prefix but not `/translate`. The API key is optional and session-only.
+Only pressing **Translate with LibreTranslate** sends the word; the context
+is not sent or substituted for the word.
+
+Install/start the service and its language models using the
+[LibreTranslate installation guide](https://docs.libretranslate.com/guides/installation/).
+The service and models are not bundled with ShoWThis. Self-hosting is free;
+the official hosted server requires a paid API key. Use HTTPS for remote
+servers; HTTP is unencrypted. Requests cannot follow redirects to another origin.
+DeepL remains available in the same provider picker.
 
 ## Data and cache
 

@@ -73,6 +73,7 @@ NotebookSurface {
         }
         ScrollView {
             id: scroll
+            objectName: "word_card_scroll"
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true

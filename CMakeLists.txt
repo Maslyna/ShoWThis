@@ -47,6 +47,7 @@ qt_add_library(showthis_core STATIC
     src/TranslationProvider.h src/TranslationProviders.cpp
     src/TranslationService.h src/TranslationService.cpp
     src/DeepLTranslator.h src/DeepLTranslator.cpp
+    src/LibreTranslateTranslator.h src/LibreTranslateTranslator.cpp
 )
 target_include_directories(showthis_core PUBLIC src)
 target_link_libraries(showthis_core PUBLIC Qt6::Core Qt6::Network Qt6::Concurrent Qt6::Sql ZLIB::ZLIB)

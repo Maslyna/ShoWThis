@@ -3,6 +3,7 @@
 #include <QFileDialog>
 #include <QLineEdit>
 #include <QPalette>
+#include <QPainter>
 #include <QQuickItem>
 #include <QSignalSpy>
 #include <QScopeGuard>
@@ -44,6 +45,51 @@ static QQuickItem *find_item(QQuickItem *parent, const QString &name) {
     return nullptr;
 }
 
+static QList<showthis::ocr::WordBox> manual_context_words() {
+    return {
+        {QStringLiteral("Haus"), QRect(120, 200, 120, 40), QStringLiteral("Original OCR context.")},
+        {QStringLiteral("steht"), QRect(300, 200, 140, 40)},
+        {QStringLiteral("hier."), QRect(500, 200, 120, 40)},
+        {QStringLiteral("Das"), QRect(120, 300, 100, 40)},
+        {QStringLiteral("Haus"), QRect(300, 300, 120, 40)},
+        {QStringLiteral("bleibt."), QRect(500, 300, 140, 40)},
+        {QStringLiteral("Rand"), QRect(700, 200, 160, 40)}
+    };
+}
+
+static QImage manual_context_image(const QList<showthis::ocr::WordBox> &words) {
+    QImage image(1600, 1000, QImage::Format_RGB32);
+    image.fill(QColor("#faf8f3"));
+    QPainter painter(&image);
+    painter.setPen(QColor("#242424"));
+    QFont font = painter.font();
+    font.setPixelSize(26);
+    painter.setFont(font);
+    for (const auto &word : words)
+        painter.drawText(word.rect, Qt::AlignLeft | Qt::AlignVCenter, word.text);
+    return image;
+}
+
+static QPoint image_point(const showthis::ShoWSurface &surface, const QPointF &point) {
+    return QPoint(qRound(point.x() * surface.width() / surface.image_size().width()),
+                  qRound(point.y() * surface.height() / surface.image_size().height()));
+}
+
+static void click_item(showthis::ShoWSurface &surface, QQuickItem *item) {
+    QTest::qWait(30);
+    QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier,
+        item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint());
+}
+
+static void drag_context(showthis::ShoWSurface &surface, const QPointF &from, const QPointF &to) {
+    const auto start = image_point(surface, from);
+    const auto end = image_point(surface, to);
+    QTest::mousePress(&surface, Qt::LeftButton, Qt::NoModifier, start);
+    QTest::mouseMove(&surface, (start + end) / 2, 10);
+    QTest::mouseMove(&surface, end, 10);
+    QTest::mouseRelease(&surface, Qt::LeftButton, Qt::NoModifier, end);
+}
+
 class OverlayTest : public QObject {
     Q_OBJECT
     QTemporaryDir m_settings_directory;
@@ -58,6 +104,467 @@ private slots:
 
     void init() {
         QSettings{}.clear();
+    }
+
+    void manual_context_selection_data() {
+        QTest::addColumn<QSize>("size");
+        QTest::newRow("desktop") << QSize(1100, 800);
+        QTest::newRow("compact") << QSize(640, 750);
+        QTest::newRow("small") << QSize(480, 640);
+    }
+
+    void manual_context_selection() {
+        QFETCH(QSize, size);
+        QTemporaryDir directory;
+        const auto path = directory.filePath("words.json");
+        TestNetwork network;
+        showthis::LearningService service(nullptr, path, &network);
+        showthis::ShoWSurface surface(nullptr, &service);
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
+        TestCaptureBackend backend;
+        std::atomic_int scans{0};
+        showthis::OverlayController controller(surface, backend, [&](const QImage &, const QString &) {
+            ++scans;
+            return showthis::ScanResult{};
+        });
+        surface.resize(size);
+        const auto words = manual_context_words();
+        surface.set_image(manual_context_image(words), words);
+        const auto original_source = surface.image_source();
+        QSignalSpy image_changes(&surface, &showthis::ShoWSurface::imageChanged);
+        QSignalSpy word_changes(&surface, &showthis::ShoWSurface::wordsChanged);
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier, image_point(surface, QPoint(180, 220)));
+        auto *panel = find_item(surface.contentItem(), "learning_panel");
+        auto *word = find_item(surface.contentItem(), "lookup_word");
+        auto *context = find_item(surface.contentItem(), "word_context");
+        auto *meaning = find_item(surface.contentItem(), "word_meaning");
+        auto *select = find_item(surface.contentItem(), "select_context");
+        auto *picker = find_item(surface.contentItem(), "context_selection");
+        auto *preview = find_item(surface.contentItem(), "context_selection_preview");
+        auto *apply = find_item(surface.contentItem(), "context_selection_apply");
+        auto *clear = find_item(surface.contentItem(), "context_selection_clear");
+        auto *cancel = find_item(surface.contentItem(), "context_selection_cancel");
+        auto *popup = find_item(surface.contentItem(), "wordPopup");
+        QVERIFY(panel && word && context && meaning && select && picker && preview && apply && clear && cancel && popup);
+        QTRY_VERIFY(panel->isVisible());
+        QCOMPARE(context->property("text").toString(), QString("Original OCR context."));
+        meaning->setProperty("text", "A house");
+        QTest::keyClick(&surface, Qt::Key_S, Qt::ControlModifier);
+        QTRY_COMPARE(service.vocabulary().size(), 1);
+        QVERIFY(!panel->property("dirty").toBool());
+        const auto card_id = panel->property("card_id").toString();
+        const auto compact_page = panel->property("compact_page").toInt();
+        click_item(surface, select);
+        QTRY_VERIFY(picker->property("active").toBool());
+        QVERIFY(!panel->isVisible());
+        QCOMPARE(picker->size(), surface.rootObject()->size());
+        QVERIFY(preview->property("readOnly").toBool());
+        QCOMPARE(preview->property("text").toString(), QString{});
+        QVERIFY(!apply->isEnabled());
+        QTest::mouseMove(&surface, image_point(surface, QPoint(180, 220)));
+        QVERIFY(!popup->isVisible());
+
+        // Merely touching a box edge does not select its word: its center must be inside.
+        drag_context(surface, QPoint(110, 190), QPoint(160, 250));
+        QCOMPARE(preview->property("text").toString(), QString{});
+        QVERIFY(!apply->isEnabled());
+
+        // Reverse-direction selection spans two OCR lines, not geometric column order.
+        drag_context(surface, QPoint(650, 350), QPoint(110, 190));
+        QTRY_COMPARE(preview->property("text").toString(), QString("Haus steht hier. Das Haus bleibt."));
+        QVERIFY(apply->isEnabled());
+        click_item(surface, clear);
+        QCOMPARE(preview->property("text").toString(), QString{});
+        QVERIFY(!apply->isEnabled());
+
+        // A drag beginning on a word selects instead of opening a different notebook card.
+        drag_context(surface, QPoint(130, 205), QPoint(450, 350));
+        QTRY_COMPARE(preview->property("text").toString(), QString("Haus steht Das Haus"));
+        QVERIFY(!panel->isVisible());
+        QCOMPARE(word->property("text").toString(), QString("Haus"));
+        drag_context(surface, QPoint(280, 190), QPoint(650, 350));
+        const auto selected_context = QString("Haus steht Das Haus\nhier. bleibt.");
+        auto *selected_word = find_item(surface.contentItem(), "context_selection_word_0");
+        auto *second_haus = find_item(surface.contentItem(), "context_selection_word_4");
+        auto *outside_word = find_item(surface.contentItem(), "context_selection_word_6");
+        auto *outline = find_item(surface.contentItem(), "word_outline_0");
+        auto *marquee = find_item(surface.contentItem(), "context_selection_rectangle");
+        QVERIFY(selected_word && second_haus && outside_word && outline && marquee);
+        QTRY_COMPARE(preview->property("text").toString(), selected_context);
+        QVERIFY(selected_word->isVisible());
+        QVERIFY(second_haus->isVisible());
+        QVERIFY(!outside_word->isVisible());
+        QVERIFY(!marquee->isVisible());
+        QCOMPARE(selected_word->mapToScene(QPointF(0, 0)), outline->mapToScene(QPointF(0, 0)));
+        QCOMPARE(selected_word->size(), outline->size());
+        QVERIFY(selected_word->property("color").value<QColor>().alpha() > 0);
+
+        // Repeated rectangles deduplicate indices, but equal text in distinct boxes survives.
+        drag_context(surface, QPoint(650, 350), QPoint(110, 190));
+        QCOMPARE(preview->property("text").toString(), selected_context);
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier, image_point(surface, QPoint(370, 220)));
+        QTRY_COMPARE(preview->property("text").toString(), QString("Haus Das Haus\nhier. bleibt."));
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier, image_point(surface, QPoint(370, 220)));
+        QTRY_COMPARE(preview->property("text").toString(), selected_context);
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier, image_point(surface, QPoint(360, 320)));
+        QTRY_COMPARE(preview->property("text").toString(), QString("Haus steht Das\nhier. bleibt."));
+        QVERIFY(!second_haus->isVisible());
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier, image_point(surface, QPoint(360, 320)));
+        QTRY_COMPARE(preview->property("text").toString(), selected_context);
+        QVERIFY(second_haus->isVisible());
+        if (qEnvironmentVariableIsSet("SHOWTHIS_TEST_SCREENSHOTS"))
+            QVERIFY(surface.grabWindow().save(qEnvironmentVariable("SHOWTHIS_TEST_SCREENSHOTS")
+                + "/manual-context-" + QTest::currentDataTag() + ".png"));
+        click_item(surface, apply);
+        QTRY_VERIFY(!picker->property("active").toBool());
+        QVERIFY(panel->isVisible());
+        QCOMPARE(panel->property("card_id").toString(), card_id);
+        QCOMPARE(panel->property("compact_page").toInt(), compact_page);
+        QCOMPARE(context->property("text").toString(), selected_context);
+        QCOMPARE(meaning->property("text").toString(), QString("A house"));
+        QVERIFY(panel->property("dirty").toBool());
+        QTest::keyClick(&surface, Qt::Key_S, Qt::ControlModifier);
+        QTRY_VERIFY(!panel->property("dirty").toBool());
+        QCOMPARE(service.vocabulary().size(), 1);
+        QCOMPARE(service.vocabulary()[0].toMap().value("context").toString(), selected_context);
+        showthis::LearningService reopened(nullptr, path, &network);
+        QCOMPARE(reopened.vocabulary()[0].toMap().value("context").toString(), selected_context);
+        QCOMPARE(reopened.vocabulary()[0].toMap().value("id").toString(), card_id);
+
+        click_item(surface, select);
+        QTRY_VERIFY(picker->property("active").toBool());
+        QCOMPARE(preview->property("text").toString(), QString{});
+        QVERIFY(!apply->isEnabled());
+        click_item(surface, cancel);
+        QTRY_VERIFY(panel->isVisible());
+        QCOMPARE(context->property("text").toString(), selected_context);
+        QVERIFY(!panel->property("dirty").toBool());
+
+        // Reapplying identical context is not a new data edit.
+        click_item(surface, select);
+        QTRY_VERIFY(picker->property("active").toBool());
+        drag_context(surface, QPoint(130, 205), QPoint(450, 350));
+        drag_context(surface, QPoint(280, 190), QPoint(650, 350));
+        QTRY_COMPARE(preview->property("text").toString(), selected_context);
+        click_item(surface, apply);
+        QTRY_VERIFY(panel->isVisible());
+        QCOMPARE(context->property("text").toString(), selected_context);
+        QVERIFY(!panel->property("dirty").toBool());
+
+        // Exit restores the ordinary OCR hover and click-to-learn interaction.
+        QTest::keyClick(&surface, Qt::Key_Escape);
+        QTRY_VERIFY(!panel->isVisible());
+        QTest::mouseMove(&surface, image_point(surface, QPoint(900, 400)));
+        QTest::mouseMove(&surface, image_point(surface, QPoint(780, 220)));
+        QTRY_VERIFY(popup->isVisible());
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier, image_point(surface, QPoint(780, 220)));
+        QTRY_VERIFY(panel->isVisible());
+        QCOMPARE(word->property("text").toString(), QString("Rand"));
+        QCOMPARE(surface.image_source(), original_source);
+        QCOMPARE(image_changes.size(), 0);
+        QCOMPARE(word_changes.size(), 0);
+        QCOMPARE(backend.capture_count, 0);
+        QCOMPARE(scans.load(), 0);
+        QCOMPARE(network.requests.size(), 0);
+        QCOMPARE(warnings.size(), 0);
+    }
+
+    void manual_context_cancel_preserves_draft_data() {
+        QTest::addColumn<bool>("dirty");
+        QTest::addColumn<bool>("escape");
+        QTest::newRow("clean-cancel") << false << false;
+        QTest::newRow("dirty-cancel") << true << false;
+        QTest::newRow("clean-escape") << false << true;
+        QTest::newRow("dirty-escape") << true << true;
+    }
+
+    void manual_context_cancel_preserves_draft() {
+        QFETCH(bool, dirty);
+        QFETCH(bool, escape);
+        QTemporaryDir directory;
+        TestNetwork network;
+        network.response = free_entry("Haus", "chosen dictionary meaning");
+        showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
+        service.set_source_language("de");
+        showthis::ShoWSurface surface(nullptr, &service);
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        surface.resize(1100, 800);
+        const auto words = manual_context_words();
+        surface.set_image(manual_context_image(words), words);
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        QSignalSpy hide_requests(&surface, &showthis::ShoWSurface::hide_requested);
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier, image_point(surface, QPoint(180, 220)));
+        auto *panel = find_item(surface.contentItem(), "learning_panel");
+        auto *lookup = find_item(surface.contentItem(), "lookup_dictionary");
+        auto *meaning = find_item(surface.contentItem(), "word_meaning");
+        auto *translation = find_item(surface.contentItem(), "word_translation");
+        auto *notes = find_item(surface.contentItem(), "personal_card_pane");
+        auto *context = find_item(surface.contentItem(), "word_context");
+        auto *word = find_item(surface.contentItem(), "lookup_word");
+        auto *select = find_item(surface.contentItem(), "select_context");
+        auto *picker = find_item(surface.contentItem(), "context_selection");
+        auto *cancel = find_item(surface.contentItem(), "context_selection_cancel");
+        auto *preview = find_item(surface.contentItem(), "context_selection_preview");
+        QVERIFY(panel && lookup && meaning && translation && notes && context && word && select && picker && cancel && preview);
+        QTRY_VERIFY(panel->isVisible());
+        click_item(surface, lookup);
+        QTRY_COMPARE(service.senses().size(), 1);
+        QTRY_VERIFY(!service.dictionary_busy());
+        QTRY_VERIFY(find_item(surface.contentItem(), "dictionary_sense_0"));
+        auto *sense = find_item(surface.contentItem(), "dictionary_sense_0");
+        click_item(surface, sense);
+        QCOMPARE(meaning->property("text").toString(), QString("chosen dictionary meaning"));
+        const auto selected_sense = service.senses()[0].toMap();
+        translation->setProperty("text", "my translation");
+        notes->setProperty("notes", "keep my notes");
+        QTest::keyClick(&surface, Qt::Key_S, Qt::ControlModifier);
+        QTRY_VERIFY(!panel->property("dirty").toBool());
+        if (dirty) {
+            meaning->setProperty("text", "unsaved chosen meaning");
+            context->setProperty("text", "Unsaved original context.");
+        }
+        const auto original_meaning = meaning->property("text").toString();
+        const auto original_context = context->property("text").toString();
+        const auto card_id = panel->property("card_id").toString();
+        const auto page = panel->property("compact_page").toInt();
+        const auto senses = service.senses();
+        const auto source = service.source();
+        const auto requests = network.requests.size();
+        QCOMPARE(panel->property("dirty").toBool(), dirty);
+        click_item(surface, select);
+        QTRY_VERIFY(picker->property("active").toBool());
+        QVERIFY(!panel->isVisible());
+        drag_context(surface, QPoint(110, 190), QPoint(650, 350));
+        QTRY_COMPARE(preview->property("text").toString(), QString("Haus steht hier. Das Haus bleibt."));
+        if (escape)
+            QTest::keyClick(&surface, Qt::Key_Escape);
+        else
+            click_item(surface, cancel);
+        QTRY_VERIFY(!picker->property("active").toBool());
+        QVERIFY(panel->isVisible());
+        QVERIFY(surface.isVisible());
+        QCOMPARE(hide_requests.size(), 0);
+        QCOMPARE(panel->property("card_id").toString(), card_id);
+        QCOMPARE(panel->property("compact_page").toInt(), page);
+        QCOMPARE(panel->property("dirty").toBool(), dirty);
+        QCOMPARE(word->property("text").toString(), QString("Haus"));
+        QCOMPARE(context->property("text").toString(), original_context);
+        QCOMPARE(meaning->property("text").toString(), original_meaning);
+        QCOMPARE(translation->property("text").toString(), QString("my translation"));
+        QCOMPARE(notes->property("notes").toString(), QString("keep my notes"));
+        QCOMPARE(service.senses(), senses);
+        QCOMPARE(service.source(), source);
+        if (!dirty)
+            notes->setProperty("notes", "another note");
+        QTest::keyClick(&surface, Qt::Key_S, Qt::ControlModifier);
+        QTRY_VERIFY(!panel->property("dirty").toBool());
+        const auto saved = service.vocabulary()[0].toMap();
+        QCOMPARE(saved.value("sense").toMap(), selected_sense);
+        QCOMPARE(saved.value("context").toString(), original_context);
+        QCOMPARE(saved.value("meaning").toString(), original_meaning);
+        QCOMPARE(network.requests.size(), requests);
+    }
+
+    void manual_context_unavailable_without_screenshot_or_words() {
+        QTemporaryDir directory;
+        TestNetwork network;
+        network.automatic = false;
+        network.response = free_entry("Haus", "house");
+        showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
+        service.set_source_language("de");
+        showthis::ShoWSurface surface(nullptr, &service);
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        surface.resize(1100, 800);
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        auto *panel = find_item(surface.contentItem(), "learning_panel");
+        QVERIFY(panel);
+        QVERIFY(QMetaObject::invokeMethod(panel, "open_word", Q_ARG(QString, QString("Haus")),
+            Q_ARG(QString, QString("Keep this context."))));
+        auto *select = find_item(surface.contentItem(), "select_context");
+        auto *picker = find_item(surface.contentItem(), "context_selection");
+        auto *context = find_item(surface.contentItem(), "word_context");
+        auto *lookup = find_item(surface.contentItem(), "lookup_dictionary");
+        QVERIFY(select && picker && context && lookup);
+        QTRY_VERIFY(select->isVisible());
+        QVERIFY(!select->isEnabled());
+        click_item(surface, select);
+        QVERIFY(!picker->property("active").toBool());
+        const auto words = manual_context_words();
+        surface.set_words(words);
+        QVERIFY(!select->isEnabled());
+        surface.set_image(manual_context_image(words));
+        QVERIFY(!select->isEnabled());
+        surface.set_words(words);
+        QTRY_VERIFY(select->isEnabled());
+        surface.set_scanning(true);
+        QVERIFY(select->isVisible());
+        QVERIFY(!select->isEnabled());
+        surface.set_scanning(false);
+        QTRY_VERIFY(select->isEnabled());
+        click_item(surface, lookup);
+        QTRY_VERIFY(service.dictionary_busy());
+        QVERIFY(select->isVisible());
+        QVERIFY(!select->isEnabled());
+        click_item(surface, select);
+        QVERIFY(!picker->property("active").toBool());
+        QVERIFY(network.last_reply);
+        network.last_reply->complete();
+        QTRY_VERIFY(!service.dictionary_busy());
+        QTRY_VERIFY(select->isEnabled());
+        QCOMPARE(context->property("text").toString(), QString("Keep this context."));
+        service.translator()->set_provider_id("deepl");
+        service.translator()->set_option("api_key", "test-key");
+        service.set_target_language("uk");
+        network.response = R"({"translations":[{"text":"будинок"}]})";
+        service.translate("Haus", "Keep this context.");
+        QTRY_VERIFY(service.translator()->busy());
+        QVERIFY(select->isVisible());
+        QVERIFY(!select->isEnabled());
+        click_item(surface, select);
+        QVERIFY(!picker->property("active").toBool());
+        QVERIFY(network.last_reply);
+        network.last_reply->complete();
+        QTRY_VERIFY(!service.translator()->busy());
+        QTRY_VERIFY(select->isEnabled());
+    }
+
+    void manual_context_invalidation_during_gesture_data() {
+        QTest::addColumn<QString>("invalidation");
+        for (const auto *reason : {"image", "words", "scanning", "hidden"})
+            QTest::newRow(reason) << QString::fromLatin1(reason);
+    }
+
+    void manual_context_invalidation_during_gesture() {
+        QFETCH(QString, invalidation);
+        QTemporaryDir directory;
+        TestNetwork network;
+        showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
+        showthis::ShoWSurface surface(nullptr, &service);
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        surface.resize(1100, 800);
+        const auto words = manual_context_words();
+        const auto image = manual_context_image(words);
+        surface.set_image(image, words);
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier, image_point(surface, QPoint(180, 220)));
+        auto *panel = find_item(surface.contentItem(), "learning_panel");
+        auto *context = find_item(surface.contentItem(), "word_context");
+        auto *meaning = find_item(surface.contentItem(), "word_meaning");
+        auto *select = find_item(surface.contentItem(), "select_context");
+        auto *picker = find_item(surface.contentItem(), "context_selection");
+        auto *preview = find_item(surface.contentItem(), "context_selection_preview");
+        auto *apply = find_item(surface.contentItem(), "context_selection_apply");
+        QVERIFY(panel && context && meaning && select && picker && preview && apply);
+        QTRY_VERIFY(panel->isVisible());
+        meaning->setProperty("text", "unsaved meaning");
+        click_item(surface, select);
+        QTRY_VERIFY(picker->property("active").toBool());
+        drag_context(surface, QPoint(110, 190), QPoint(650, 250));
+        QTRY_COMPARE(preview->property("text").toString(), QString("Haus steht hier."));
+        const auto start = image_point(surface, QPoint(110, 290));
+        const auto end = image_point(surface, QPoint(650, 350));
+        QTest::mousePress(&surface, Qt::LeftButton, Qt::NoModifier, start);
+        QTest::mouseMove(&surface, (start + end) / 2, 10);
+        if (invalidation == "image")
+            surface.set_image(image, words);
+        else if (invalidation == "words")
+            surface.set_words({{QString("Replacement"), QRect(120, 200, 120, 40)}});
+        else if (invalidation == "scanning")
+            surface.set_scanning(true);
+        else
+            surface.hide();
+        QTRY_VERIFY(!picker->property("active").toBool());
+        QTest::mouseRelease(&surface, Qt::LeftButton, Qt::NoModifier, end);
+        surface.set_scanning(false);
+        if (!surface.isVisible()) {
+            surface.show();
+            QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        }
+        QTRY_VERIFY(panel->isVisible());
+        QCOMPARE(context->property("text").toString(), QString("Original OCR context."));
+        QCOMPARE(meaning->property("text").toString(), QString("unsaved meaning"));
+        QVERIFY(panel->property("dirty").toBool());
+        click_item(surface, select);
+        QTRY_VERIFY(picker->property("active").toBool());
+        QCOMPARE(preview->property("text").toString(), QString{});
+        QVERIFY(!apply->isEnabled());
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier, image_point(surface, QPoint(180, 220)));
+        QTRY_COMPARE(preview->property("text").toString(),
+            invalidation == "words" ? QString("Replacement") : QString("Haus"));
+        QTest::keyClick(&surface, Qt::Key_Escape);
+        QTRY_VERIFY(panel->isVisible());
+        QCOMPARE(context->property("text").toString(), QString("Original OCR context."));
+        QCOMPARE(network.requests.size(), 0);
+    }
+
+    void manual_context_resize_and_movable_controls() {
+        QTemporaryDir directory;
+        showthis::LearningService service(nullptr, directory.filePath("words.json"));
+        showthis::ShoWSurface surface(nullptr, &service);
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        surface.resize(1100, 800);
+        auto words = manual_context_words();
+        surface.set_image(manual_context_image(words), words);
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier, image_point(surface, QPoint(180, 220)));
+        auto *panel = find_item(surface.contentItem(), "learning_panel");
+        auto *select = find_item(surface.contentItem(), "select_context");
+        auto *picker = find_item(surface.contentItem(), "context_selection");
+        auto *preview = find_item(surface.contentItem(), "context_selection_preview");
+        auto *clear = find_item(surface.contentItem(), "context_selection_clear");
+        auto *controls = find_item(surface.contentItem(), "context_selection_controls");
+        auto *handle = find_item(surface.contentItem(), "context_selection_drag_handle");
+        QVERIFY(panel && select && picker && preview && clear && controls && handle);
+        QTRY_VERIFY(panel->isVisible());
+        click_item(surface, select);
+        QTRY_VERIFY(picker->property("active").toBool());
+        QTRY_VERIFY(controls->width() > 0 && controls->height() > 0);
+        const auto covered = controls->mapToScene(QPointF(controls->width() / 2, controls->height() / 2));
+        const QPointF covered_image(covered.x() * surface.image_size().width() / surface.width(),
+                                    covered.y() * surface.image_size().height() / surface.height());
+        QTest::keyClick(&surface, Qt::Key_Escape);
+        QTRY_VERIFY(panel->isVisible());
+        words.append({QString("Behind"), QRect(qRound(covered_image.x()) - 40,
+            qRound(covered_image.y()) - 15, 80, 30)});
+        surface.set_image(manual_context_image(words), words);
+        click_item(surface, select);
+        QTRY_VERIFY(picker->property("active").toBool());
+        QVERIFY(controls->contains(controls->mapFromScene(covered)));
+        const auto before = controls->mapToScene(QPointF(0, 0));
+        const auto start = handle->mapToScene(QPointF(handle->width() / 2, handle->height() / 2)).toPoint();
+        const QPoint offset(0, covered.y() > surface.height() / 2 ? -300 : 300);
+        QTest::mousePress(&surface, Qt::LeftButton, Qt::NoModifier, start);
+        QTest::mouseMove(&surface, start + offset / 2, 10);
+        QTest::mouseMove(&surface, start + offset, 10);
+        QTest::mouseRelease(&surface, Qt::LeftButton, Qt::NoModifier, start + offset);
+        QTRY_VERIFY(qAbs(controls->mapToScene(QPointF(0, 0)).y() - before.y()) > 100);
+        QCOMPARE(preview->property("text").toString(), QString{});
+        QVERIFY(!controls->contains(controls->mapFromScene(covered)));
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier, covered.toPoint());
+        QTRY_COMPARE(preview->property("text").toString(), QString("Behind"));
+        click_item(surface, clear);
+        surface.resize(640, 750);
+        QTRY_COMPARE(picker->size(), QSizeF(640, 750));
+        const auto controls_corner = controls->mapToScene(QPointF(controls->width(), controls->height()));
+        QVERIFY(controls_corner.x() <= surface.width());
+        QVERIFY(controls_corner.y() <= surface.height());
+        // Hide controls at the bottom if their moved position now covers the sample text.
+        const auto resized_start = handle->mapToScene(QPointF(handle->width() / 2, handle->height() / 2)).toPoint();
+        const auto resized_end = QPoint(resized_start.x(), surface.height() - qRound(controls->height()) + 15);
+        QTest::mousePress(&surface, Qt::LeftButton, Qt::NoModifier, resized_start);
+        QTest::mouseMove(&surface, resized_end, 10);
+        QTest::mouseRelease(&surface, Qt::LeftButton, Qt::NoModifier, resized_end);
+        drag_context(surface, QPoint(650, 350), QPoint(110, 190));
+        QTRY_COMPARE(preview->property("text").toString(), QString("Haus steht hier. Das Haus bleibt."));
+        QTest::keyClick(&surface, Qt::Key_Escape);
+        QTRY_VERIFY(panel->isVisible());
     }
 
     void word_card_context_data() {
@@ -1132,6 +1639,118 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
         QVERIFY(service.vocabulary()[0].toMap().value("translation").toString().isEmpty());
         QVERIFY(network.requests.isEmpty());
+        QCOMPARE(warnings.size(), 0);
+    }
+
+    void libretranslate_settings_and_word_translation_data() {
+        QTest::addColumn<QSize>("size");
+        QTest::newRow("desktop") << QSize(1100, 900);
+        QTest::newRow("compact") << QSize(640, 750);
+    }
+
+    void libretranslate_settings_and_word_translation() {
+        QFETCH(QSize, size);
+        QTemporaryDir directory;
+        TestNetwork network;
+        network.response = R"({"translatedText":"будинок"})";
+        const auto path = directory.filePath("words.json");
+        showthis::LearningService service(nullptr, path, &network);
+        service.set_source_language("de");
+        service.set_target_language("uk");
+        showthis::ShoWSurface surface(nullptr, &service);
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
+        surface.resize(size);
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        auto *panel = find_item(surface.contentItem(), "learning_panel");
+        auto *navigation = find_item(surface.contentItem(), "notebook_tabs");
+        auto *translation = find_item(surface.contentItem(), "word_translation");
+        auto *meaning = find_item(surface.contentItem(), "word_meaning");
+        auto *translate = find_item(surface.contentItem(), "translate_word");
+        auto *save = find_item(surface.contentItem(), "save_word");
+        QVERIFY(panel && navigation && translation && meaning && translate && save);
+        QVERIFY(QMetaObject::invokeMethod(panel, "open_word", Q_ARG(QString, QString("Haus")),
+            Q_ARG(QString, QString("PRIVATE CONTEXT"))));
+        meaning->setProperty("text", "house");
+        translation->setProperty("text", "my existing translation");
+        navigation->setProperty("current_index", 3);
+        auto *provider = find_item(surface.contentItem(), "translation_provider");
+        QVERIFY(provider);
+        int libre_index = -1;
+        const auto providers = service.translator()->providers();
+        for (qsizetype index = 0; index < providers.size(); ++index) {
+            if (providers[index].toMap().value("id").toString() == "libretranslate")
+                libre_index = int(index);
+        }
+        QVERIFY(libre_index >= 0);
+        click_item(surface, provider);
+        QTest::keyClick(&surface, Qt::Key_Home);
+        for (int index = 0; index < libre_index; ++index)
+            QTest::keyClick(&surface, Qt::Key_Down);
+        QTest::keyClick(&surface, Qt::Key_Return);
+        QTRY_COMPARE(service.translator()->provider_id(), QString("libretranslate"));
+        QVERIFY(service.translator()->configured());
+        QTRY_VERIFY(find_item(surface.contentItem(), "translator_input_base_url"));
+        auto *url = find_item(surface.contentItem(), "translator_input_base_url");
+        auto *apply_url = find_item(surface.contentItem(), "apply_translator_base_url");
+        auto *key = find_item(surface.contentItem(), "translator_input_api_key");
+        auto *apply_key = find_item(surface.contentItem(), "apply_translator_api_key");
+        auto *forget = find_item(surface.contentItem(), "forget_translator_credentials");
+        auto *settings = find_item(surface.contentItem(), "notebook_settings_scroll");
+        QVERIFY(url && apply_url && key && apply_key && forget && settings);
+        auto *flickable = settings->property("contentItem").value<QQuickItem *>();
+        QVERIFY(flickable);
+        auto *content = flickable->property("contentItem").value<QQuickItem *>();
+        QVERIFY(content);
+        flickable->setProperty("contentY", qMax(0.0, provider->mapToItem(content, QPointF()).y() - 100));
+        QCOMPARE(url->property("text").toString(), QString("http://127.0.0.1:5000"));
+        url->setProperty("text", "http://127.0.0.1:6123/libre");
+        click_item(surface, apply_url);
+        QCOMPARE(service.translator()->options().value("base_url").toString(), QString("http://127.0.0.1:6123/libre"));
+        key->setProperty("text", "private-libre-key");
+        click_item(surface, apply_key);
+        QTRY_VERIFY(key->property("text").toString().isEmpty());
+        QCOMPARE(translation->property("text").toString(), QString("my existing translation"));
+        QVERIFY(network.requests.isEmpty());
+        if (qEnvironmentVariableIsSet("SHOWTHIS_TEST_SCREENSHOTS"))
+            QVERIFY(surface.grabWindow().save(qEnvironmentVariable("SHOWTHIS_TEST_SCREENSHOTS")
+                + "/libretranslate-settings-" + QTest::currentDataTag() + ".png"));
+        navigation->setProperty("current_index", 0);
+        if (!panel->property("wide_layout").toBool())
+            panel->setProperty("compact_page", 1);
+        QTRY_VERIFY(translate->isVisible() && translate->isEnabled());
+        QVERIFY(translate->property("text").toString().contains("LibreTranslate"));
+        auto *card_scroll = find_item(surface.contentItem(), "word_card_scroll");
+        QVERIFY(card_scroll);
+        auto *card_flickable = card_scroll->property("contentItem").value<QQuickItem *>();
+        QVERIFY(card_flickable);
+        card_flickable->setProperty("contentY",
+            qMax(0.0, card_flickable->property("contentHeight").toReal() - card_flickable->height()));
+        click_item(surface, translate);
+        QTRY_COMPARE(translation->property("text").toString(), QString::fromUtf8("будинок"));
+        QCOMPARE(network.requests.size(), 1);
+        QCOMPARE(network.requests[0].url(), QUrl("http://127.0.0.1:6123/libre/translate"));
+        const auto body = QJsonDocument::fromJson(network.payloads[0]).object();
+        QCOMPARE(body.value("q").toString(), QString("Haus"));
+        QCOMPARE(body.value("api_key").toString(), QString("private-libre-key"));
+        QVERIFY(!network.payloads[0].contains("PRIVATE CONTEXT"));
+        navigation->setProperty("current_index", 3);
+        flickable->setProperty("contentY", qMax(0.0, provider->mapToItem(content, QPointF()).y() - 100));
+        click_item(surface, forget);
+        QVERIFY(service.translator()->configured());
+        QCOMPARE(translation->property("text").toString(), QString::fromUtf8("будинок"));
+        navigation->setProperty("current_index", 0);
+        QTRY_VERIFY(translate->isVisible());
+        click_item(surface, save);
+        QCOMPARE(service.vocabulary().size(), 1);
+        showthis::LearningService reopened(nullptr, path, &network);
+        QCOMPARE(reopened.vocabulary()[0].toMap().value("translation").toString(), QString::fromUtf8("будинок"));
+        QVERIFY(reopened.translator()->configured());
+        QCOMPARE(reopened.translator()->provider_id(), QString("libretranslate"));
+        QFile vocabulary(path);
+        QVERIFY(vocabulary.open(QIODevice::ReadOnly));
+        QVERIFY(!vocabulary.readAll().contains("private-libre-key"));
         QCOMPARE(warnings.size(), 0);
     }
 

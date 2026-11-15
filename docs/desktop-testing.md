@@ -9,6 +9,12 @@ timeouts, missing/empty/unusable shortcut bindings, explicit v2 configuration,
 v1/settings guidance, configuration errors, stale replies, binding changes and
 activation filtering. No compositor or live portal is changed.
 
+`OverlayTest` exercises manual context selection on the offscreen/software Qt
+surface: additive/reversed rectangles, word toggles, overlap deduplication,
+selection ordering, saving, cancel/Escape, stale-image cancellation, scaling,
+resizing, and movable preview controls. Optional `SHOWTHIS_TEST_SCREENSHOTS`
+captures desktop, compact, and small-screen context-picker views.
+
 OCR uses a 15-second recognition deadline and cooperative shutdown cancellation.
 Cancellation is checked before recognition and by Tesseract's progress monitor.
 It is not a hard process kill: model initialization and external/native I/O do
@@ -24,6 +30,11 @@ compositor permissions, keyboard grabs, or display geometry.
    Confirm the global-shortcut permission prompt and bind Ctrl+Alt+Space.
 2. Capture recognizable text on each monitor, including mixed scaling. Check
    screenshot/word-outline alignment and that the active monitor is used.
+   Select a word, then **Select context**. Add several rectangles and toggle
+   individual words; verify highlights match the preview with no overlap
+   duplicates. Move the preview panel to select text underneath it. Apply and
+   save, then reopen the card to verify its context. Cancel/Esc must preserve
+   an unsaved draft; hiding or recapturing during selection must not apply it.
 3. Toggle rapidly during capture/OCR. Hide the overlay while work runs; it must
    stay hidden. Quit during recognition and verify cooperative shutdown.
 4. Deny shortcut permission. Confirm an actionable warning and working tray capture.
