@@ -61,10 +61,12 @@ void add_word_forms(QVariantMap &item, const QJsonObject &sense, const QJsonObje
         const auto form = value.toObject();
         const auto tags = form.value("tags").toVariant().toStringList();
         const auto word = form.value("word").toString(form.value("form").toString()).trimmed();
-        if (!citation_form(tags) || tags.contains("diminutive") || tags.contains("alternative") || tags.contains("abbreviation"))
-            continue;
         if (missing_dictionary_form(word)) {
-            if (!word.isEmpty()) {
+            // A missing case, register, or other qualified form says nothing
+            // about the entire number. Require an unqualified number marker.
+            if (!word.isEmpty() && std::all_of(tags.begin(), tags.end(), [](const QString &tag) {
+                    return tag == "singular" || tag == "plural";
+                })) {
                 for (const auto &number : {"singular", "plural"}) {
                     if (tags.contains(number))
                         append_unique(unavailable, number);
@@ -72,6 +74,8 @@ void add_word_forms(QVariantMap &item, const QJsonObject &sense, const QJsonObje
             }
             continue;
         }
+        if (!citation_form(tags) || tags.contains("diminutive") || tags.contains("alternative") || tags.contains("abbreviation"))
+            continue;
         if (tags.contains("singular"))
             append_unique(singulars, word);
         if (tags.contains("plural"))

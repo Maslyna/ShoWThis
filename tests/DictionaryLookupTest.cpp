@@ -1,8 +1,11 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QNetworkProxy>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QtTest>
 #include <algorithm>
 #include <memory>
@@ -10,9 +13,65 @@
 #include "DictionaryData.h"
 #include "DictionaryFixtures.h"
 #include "DictionaryLookup.h"
+#include "KaikkiDictionaryProvider.h"
 #include "LearningService.h"
 #include "NotebookData.h"
 #include "TestNetwork.h"
+
+class RedirectServer : public QTcpServer {
+public:
+    QList<QByteArray> requests;
+    std::function<QByteArray(const QByteArray &)> responder;
+
+    RedirectServer() {
+        connect(this, &QTcpServer::newConnection, this, [this]() {
+            while (hasPendingConnections()) {
+                auto *socket = nextPendingConnection();
+                connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+                connect(socket, &QTcpSocket::readyRead, this,
+                    [this, socket, data = QByteArray{}, handled = false]() mutable {
+                        if (handled)
+                            return;
+                        data += socket->readAll();
+                        if (!data.contains("\r\n\r\n"))
+                            return;
+                        handled = true;
+                        const auto path = data.split(' ').value(1);
+                        requests.append(path);
+                        const auto reply = responder(path);
+                        if (!reply.isEmpty()) {
+                            socket->write(reply);
+                            socket->disconnectFromHost();
+                        }
+                    });
+            }
+        });
+    }
+
+    QUrl url(const QString &path) const {
+        return QUrl(QString("http://127.0.0.1:%1%2").arg(serverPort()).arg(path));
+    }
+
+    static QByteArray response(const QByteArray &body, const QByteArray &location = {}) {
+        return (location.isEmpty() ? QByteArray("HTTP/1.1 200 OK\r\n")
+                                  : QByteArray("HTTP/1.1 302 Found\r\nLocation: ") + location + "\r\n")
+            + "Content-Length: " + QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body;
+    }
+};
+
+class RedirectDictionaryProvider : public SampleDictionaryProvider {
+public:
+    explicit RedirectDictionaryProvider(QUrl initial) : m_initial(std::move(initial)) {}
+
+    showthis::DictionaryRequest request(const QString &, const QString &, const QString &) const override {
+        QUrl root = m_initial;
+        root.setPath("/edition/");
+        return {QNetworkRequest(m_initial), "GET", {}, {}, showthis::DictionaryRequestBoundary{root}};
+    }
+
+private:
+    QUrl m_initial;
+};
 
 class DictionaryLookupTest : public QObject {
     Q_OBJECT
@@ -328,6 +387,136 @@ private slots:
         QVERIFY(!finished[0][1].toString().isEmpty());
     }
 
+    void kaikki_request_boundary_data() {
+        QTest::addColumn<QString>("edition");
+        QTest::addColumn<QString>("destination");
+        QTest::addColumn<bool>("index_allowed");
+        QTest::addColumn<bool>("entry_allowed");
+        QTest::newRow("english-index") << QString("en") << QString("https://kaikki.org/dictionary/search/start/ha.json") << true << false;
+        QTest::newRow("russian-entry") << QString("ru")
+            << QString("https://kaikki.org/ruwiktionary/All%20languages%20combined/meaning/h/ha/Haus.jsonl") << false << true;
+        QTest::newRow("explicit-https-port") << QString("ru")
+            << QString("https://kaikki.org:443/ruwiktionary/search/start/ha.json") << true << false;
+        QTest::newRow("edition-root") << QString("ru") << QString("https://kaikki.org/ruwiktionary/") << false << false;
+        QTest::newRow("in-index-normalized") << QString("ru")
+            << QString("https://kaikki.org/ruwiktionary/search/start/a/../ha.json") << true << false;
+        QTest::newRow("other-host") << QString("ru") << QString("https://example.com/ruwiktionary/secret") << false << false;
+        QTest::newRow("host-suffix") << QString("ru") << QString("https://kaikki.org.example.com/ruwiktionary/secret") << false << false;
+        QTest::newRow("http-downgrade") << QString("ru") << QString("http://kaikki.org/ruwiktionary/secret") << false << false;
+        QTest::newRow("other-port") << QString("ru") << QString("https://kaikki.org:444/ruwiktionary/secret") << false << false;
+        QTest::newRow("credentials") << QString("ru") << QString("https://user@kaikki.org/ruwiktionary/secret") << false << false;
+        QTest::newRow("other-edition") << QString("ru") << QString("https://kaikki.org/dictionary/secret") << false << false;
+        QTest::newRow("edition-prefix-only") << QString("ru") << QString("https://kaikki.org/ruwiktionary-extra/secret") << false << false;
+        QTest::newRow("parent-escape") << QString("ru") << QString("https://kaikki.org/ruwiktionary/../dictionary/secret") << false << false;
+        QTest::newRow("encoded-parent-escape") << QString("ru")
+            << QString("https://kaikki.org/ruwiktionary/search/start/%2e%2e/secret") << false << false;
+        QTest::newRow("encoded-separator-escape") << QString("ru")
+            << QString("https://kaikki.org/ruwiktionary/search/start/a%2f..%2f..%2fsecret") << false << false;
+    }
+
+    void kaikki_request_boundary() {
+        QFETCH(QString, edition);
+        QFETCH(QString, destination);
+        QFETCH(bool, index_allowed);
+        QFETCH(bool, entry_allowed);
+        showthis::KaikkiDictionaryProvider provider;
+        const auto index = provider.request("Haus", "de", edition);
+        QVERIFY(index.boundary);
+        QVERIFY(index.boundary->allows(index.request.url()));
+        QCOMPARE(index.boundary->allows(QUrl(destination)), index_allowed);
+        const auto entry = provider.read_response(index, kaikki_index("Haus", edition), "Haus", "de", edition);
+        QVERIFY(entry.next);
+        QVERIFY(entry.next->boundary);
+        QVERIFY(entry.next->boundary->allows(entry.next->request.url()));
+        QCOMPARE(entry.next->boundary->allows(QUrl(destination)), entry_allowed);
+        const auto partition = provider.read_response(index, "[true, []]", "Haus", "de", edition);
+        QVERIFY(partition.next);
+        QVERIFY(partition.next->boundary);
+        QCOMPARE(partition.next->boundary->allows(QUrl(destination)), index_allowed);
+    }
+
+    void actual_transport_validates_every_redirect_data() {
+        QTest::addColumn<QByteArray>("first_destination");
+        QTest::addColumn<QByteArray>("second_destination");
+        QTest::addColumn<bool>("allowed");
+        QTest::newRow("relative-chain") << QByteArray("nested/middle") << QByteArray("../final") << true;
+        QTest::newRow("root-relative-chain") << QByteArray("/edition/nested/middle") << QByteArray("/edition/final") << true;
+        QTest::newRow("path-escape") << QByteArray("../outside") << QByteArray{} << false;
+        QTest::newRow("host-escape") << QByteArray("other-host") << QByteArray{} << false;
+        QTest::newRow("port-escape") << QByteArray("other-port") << QByteArray{} << false;
+        QTest::newRow("later-path-escape") << QByteArray("nested/middle") << QByteArray("../../outside") << false;
+        QTest::newRow("later-host-escape") << QByteArray("nested/middle") << QByteArray("other-host") << false;
+    }
+
+    void actual_transport_validates_every_redirect() {
+        QFETCH(QByteArray, first_destination);
+        QFETCH(QByteArray, second_destination);
+        QFETCH(bool, allowed);
+        RedirectServer server;
+        RedirectServer outside;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        QVERIFY(outside.listen(QHostAddress::LocalHost));
+        const auto resolve_destination = [&](const QByteArray &destination) {
+            if (destination == "other-host")
+                return QByteArray("//localhost:") + QByteArray::number(outside.serverPort()) + "/edition/final";
+            if (destination == "other-port")
+                return outside.url("/edition/final").toEncoded();
+            return destination;
+        };
+        const auto body = free_entry("Haus", "house");
+        outside.responder = [&](const QByteArray &) { return RedirectServer::response(body); };
+        server.responder = [&](const QByteArray &path) {
+            if (path == "/edition/start")
+                return RedirectServer::response({}, resolve_destination(first_destination));
+            if (path == "/edition/nested/middle")
+                return RedirectServer::response({}, resolve_destination(second_destination));
+            return RedirectServer::response(body);
+        };
+        QNetworkAccessManager network;
+        network.setProxy(QNetworkProxy::NoProxy);
+        showthis::DictionaryProviders providers;
+        providers.push_back(std::make_unique<RedirectDictionaryProvider>(server.url("/edition/start")));
+        showthis::DictionaryLookup lookup(&network, nullptr, std::move(providers));
+        QSignalSpy finished(&lookup, &showthis::DictionaryLookup::finished);
+        lookup.lookup("Haus", "de", {{{"sample", "en"}}});
+        QTRY_COMPARE(finished.size(), 1);
+        QVERIFY(!lookup.busy());
+        QVERIFY(outside.requests.isEmpty());
+        QCOMPARE(server.requests.size(), allowed ? 3 : second_destination.isEmpty() ? 1 : 2);
+        QCOMPARE(server.requests[0], QByteArray("/edition/start"));
+        if (allowed) {
+            QCOMPARE(server.requests[1], QByteArray("/edition/nested/middle"));
+            QCOMPARE(server.requests[2], QByteArray("/edition/final"));
+            QCOMPARE(senses(finished).size(), 1);
+            QVERIFY(finished[0][1].toString().isEmpty());
+            QVERIFY(finished[0][2].toBool());
+        } else {
+            QVERIFY(senses(finished).isEmpty());
+            QVERIFY(!finished[0][1].toString().isEmpty());
+            QVERIFY(!finished[0][2].toBool());
+        }
+    }
+
+    void actual_transport_cancel_after_redirect() {
+        RedirectServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        server.responder = [](const QByteArray &path) {
+            return path == "/edition/start" ? RedirectServer::response({}, "waiting") : QByteArray{};
+        };
+        QNetworkAccessManager network;
+        network.setProxy(QNetworkProxy::NoProxy);
+        showthis::DictionaryProviders providers;
+        providers.push_back(std::make_unique<RedirectDictionaryProvider>(server.url("/edition/start")));
+        showthis::DictionaryLookup lookup(&network, nullptr, std::move(providers));
+        QSignalSpy finished(&lookup, &showthis::DictionaryLookup::finished);
+        lookup.lookup("Haus", "de", {{{"sample", "en"}}});
+        QTRY_COMPARE(server.requests.size(), 2);
+        QVERIFY(lookup.busy());
+        lookup.cancel();
+        QVERIFY(!lookup.busy());
+        QVERIFY(finished.isEmpty());
+    }
+
     void cache_keys_and_preferences_are_source_and_language_specific() {
         QTemporaryDir directory;
         TestNetwork network;
@@ -390,7 +579,7 @@ private slots:
         service.lookup(word);
         QTRY_VERIFY(!service.dictionary_busy());
         QCOMPARE(service.senses().size(), 2);
-        QVERIFY(service.save_word({}, "Haus", "der Häuser", QString::fromUtf8("дом"), "", "", 1));
+        QVERIFY(service.save_word({}, "Haus", "der Häuser", QString::fromUtf8("дом"), "", "", service.senses()[1].toMap()));
         const auto card = service.vocabulary()[0].toMap();
         QCOMPARE(card.value("word").toString(), QString("Haus"));
         QCOMPARE(card.value("base_form").toString(), QString("Haus"));
@@ -414,16 +603,16 @@ private slots:
         showthis::LearningService reopened(nullptr, directory.filePath("words.json"), &network);
         QCOMPARE(reopened.vocabulary()[0].toMap().value("plural_forms").toStringList(), card.value("plural_forms").toStringList());
         const auto id = card.value("id").toString();
-        QVERIFY(reopened.save_word(id, "Haus", "", "home", "", "note edit", -1));
+        QVERIFY(reopened.save_word(id, "Haus", "", "home", "", "note edit", {}));
         QCOMPARE(reopened.vocabulary()[0].toMap().value("base_article").toString(), QString("das"));
         const QVariantMap manual{{"base_form", "house"}, {"base_article", "the"}, {"plural_forms", QStringList{"houses"}}};
-        QVERIFY(reopened.save_word(id, "Haus", "", "home", "", "", -1, "", manual));
+        QVERIFY(reopened.save_word(id, "Haus", "", "home", "", "", {}, "", manual));
         QCOMPARE(reopened.vocabulary()[0].toMap().value("base_form").toString(), QString("house"));
         const QVariantMap invalid{{"plural_forms", QStringList{"bad\nform"}}};
-        QVERIFY(!reopened.save_word(id, "Haus", "", "home", "", "", -1, "", invalid));
+        QVERIFY(!reopened.save_word(id, "Haus", "", "home", "", "", {}, "", invalid));
         QCOMPARE(reopened.vocabulary()[0].toMap().value("base_form").toString(), QString("house"));
         const QVariantMap clear{{"base_form", ""}, {"base_article", ""}, {"plural_forms", QStringList{}}};
-        QVERIFY(reopened.save_word(id, "Haus", "", "home", "", "", -1, "", clear));
+        QVERIFY(reopened.save_word(id, "Haus", "", "home", "", "", {}, "", clear));
         QVERIFY(reopened.vocabulary()[0].toMap().value("base_form").toString().isEmpty());
         QVERIFY(reopened.vocabulary()[0].toMap().value("plural_forms").toStringList().isEmpty());
     }

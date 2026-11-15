@@ -68,6 +68,12 @@ QString KaikkiDictionaryProvider::edition_path(const QString &edition) {
     return edition == "en" ? QStringLiteral("/dictionary/") : '/' + edition + "wiktionary/";
 }
 
+DictionaryRequestBoundary KaikkiDictionaryProvider::request_boundary(const QString &edition, bool entry) {
+    QUrl root(QStringLiteral("https://kaikki.org"));
+    root.setPath(edition_path(edition) + (entry ? "All languages combined/meaning/" : "search/start/"));
+    return {root};
+}
+
 DictionaryRequest KaikkiDictionaryProvider::index_request(const QString &word, const QString &edition, int prefix_length) const {
     auto prefix = word.toLower().left(prefix_length);
     for (const auto &replacement : QList<QPair<QString, QString>>{{"/", "_slash_"}, {"\\", "_backslash_"},
@@ -75,7 +81,7 @@ DictionaryRequest KaikkiDictionaryProvider::index_request(const QString &word, c
         prefix.replace(replacement.first, replacement.second);
     const auto url = QUrl::fromEncoded("https://kaikki.org" + edition_path(edition).toUtf8()
         + "search/start/" + QUrl::toPercentEncoding(prefix) + ".json");
-    return {QNetworkRequest(url), "GET", {}, {{"prefix_length", prefix_length}}};
+    return {QNetworkRequest(url), "GET", {}, {{"prefix_length", prefix_length}}, request_boundary(edition, false)};
 }
 
 DictionaryRequest KaikkiDictionaryProvider::request(const QString &word, const QString &, const QString &definition_language) const {
@@ -105,8 +111,7 @@ DictionaryResponse KaikkiDictionaryProvider::read_response(const DictionaryReque
     }
     if (match.isEmpty() && array[0].toBool() && request.state.value("prefix_length").toInt() == 2 && word.size() > 2)
         return {{}, index_request(word, definition_language, 3), {}};
-    if (match.scheme() != "https" || match.host() != "kaikki.org"
-        || !match.path().startsWith(edition_path(definition_language) + "All languages combined/meaning/")
+    if (!request_boundary(definition_language, true).allows(match)
         || !match.path().endsWith(".html"))
         return {{}, {}, QObject::tr("No entry in this definition language."), true};
     auto path = match.path();
@@ -114,7 +119,7 @@ DictionaryResponse KaikkiDictionaryProvider::read_response(const DictionaryReque
     match.setPath(path + ".jsonl");
     match.setQuery({});
     match.setFragment({});
-    return {{}, DictionaryRequest{QNetworkRequest(match), "GET", {}, {{"entry", true}}}, {}};
+    return {{}, DictionaryRequest{QNetworkRequest(match), "GET", {}, {{"entry", true}}, request_boundary(definition_language, true)}, {}};
 }
 
 }  // namespace showthis

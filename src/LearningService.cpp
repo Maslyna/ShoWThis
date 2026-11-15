@@ -362,7 +362,7 @@ void LearningService::trim_cache(QVariantList &history, QJsonObject &cache, int 
 
 bool LearningService::save_word(const QString &id, const QString &word, const QString &context,
                                const QString &meaning, const QString &translation,
-                                const QString &notes, int sense_index, const QString &article,
+                                const QString &notes, const QVariantMap &selected_sense, const QString &article,
                                 const QVariantMap &word_forms) {
     if (article.trimmed().size() > 80 || article.contains('\n') || article.contains('\r') || article.contains('\t')) {
         set_message(tr("Keep the optional word prefix to one line, at most 80 characters."));
@@ -395,26 +395,24 @@ bool LearningService::save_word(const QString &id, const QString &word, const QS
         {"created", existing >= 0 ? cards[existing].toMap().value("created").toString() : timestamp}};
     for (auto it = fields.constBegin(); it != fields.constEnd(); ++it)
         card.insert(it.key(), it.value());
-    const auto selected_sense = sense_index >= 0 && sense_index < m_senses.size() ? m_senses[sense_index].toMap() : QVariantMap{};
-    // Looking up an existing word does not select a replacement meaning.
-    // Keep its saved sense and attribution together until a sense is chosen.
-    const bool matching = !selected_sense.isEmpty() && !m_source.isEmpty()
-        && (word.trimmed() == m_lookup_word
-            || selected_sense.value("headword").toString() == word.trimmed());
+    // The chosen sense belongs to the draft, not the current lookup results.
+    // Refreshing or changing sources must not detach copied text from its licence.
+    const bool matching = !selected_sense.isEmpty() && !selected_sense.value("source").toMap().isEmpty()
+        && (selected_sense.value("headword").toString() == word.trimmed()
+            || selected_sense.value("observed_word").toString() == word.trimmed());
     const bool unchanged = old.value("word").toString() == word.trimmed()
         && dictionary_language_code(old.value("language").toString()) == m_source_language;
-    card.insert("source", matching ? selected_sense.value("source", m_source).toMap()
+    card.insert("source", matching ? selected_sense.value("source").toMap()
         : unchanged ? old.value("source").toMap() : QVariantMap{});
-    card.insert("sense", matching && sense_index >= 0 && sense_index < m_senses.size()
-        ? m_senses[sense_index].toMap() : unchanged ? old.value("sense").toMap() : QVariantMap{});
+    card.insert("sense", matching ? selected_sense : unchanged ? old.value("sense").toMap() : QVariantMap{});
     const auto word_prefix = article != "auto" ? article.trimmed()
-        : unchanged && old.contains("article") && sense_index < 0 ? old.value("article").toString()
+        : unchanged && old.contains("article") && !matching ? old.value("article").toString()
         : single_article(card.value("sense").toMap());
     card.insert("article", word_prefix);
     const auto sense = card.value("sense").toMap();
     const auto form_value = [&](const QString &key) {
         return word_forms.contains(key) ? word_forms.value(key)
-            : unchanged && sense_index < 0 && old.contains(key) ? old.value(key) : sense.value(key);
+            : unchanged && !matching && old.contains(key) ? old.value(key) : sense.value(key);
     };
     QVariantMap form_fields;
     for (const auto *key : {"base_form", "base_article", "singular_forms", "plural_forms", "number_relevant",

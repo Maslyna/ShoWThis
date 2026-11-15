@@ -88,7 +88,7 @@ private slots:
         network.response = free_entry("Haus", "house");
         showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
         service.set_source_language("de");
-        QVERIFY(service.save_word({}, "saved", "", "meaning", "", "", -1));
+        QVERIFY(service.save_word({}, "saved", "", "meaning", "", "", {}));
         const auto notebook = read(service.storage_path());
         service.lookup("Haus");
         QTRY_VERIFY(!service.dictionary_busy());
@@ -97,7 +97,7 @@ private slots:
         QVERIFY(QJsonDocument::fromJson(read(service.cache_path())).object().value("dictionary_cache").toObject().size() == 1);
         const auto saved = service.vocabulary()[0].toMap();
         QVERIFY(QFile::remove(service.storage_path()));
-        QVERIFY(service.save_word(saved.value("id").toString(), "saved", "", "meaning", "", "", -1));
+        QVERIFY(service.save_word(saved.value("id").toString(), "saved", "", "meaning", "", "", {}));
         QVERIFY(QFile::exists(service.storage_path()));
     }
 
@@ -110,7 +110,7 @@ private slots:
         broken.close();
         showthis::LearningService service(nullptr, path);
         QVERIFY(!service.storage_error().isEmpty());
-        QVERIFY(service.save_word({}, "word", "", "meaning", "", "", -1));
+        QVERIFY(service.save_word({}, "word", "", "meaning", "", "", {}));
         QCOMPARE(read(broken.fileName()), QByteArray("unrecognized cache"));
         QVERIFY(service.clear_history());
         QCOMPARE(service.vocabulary().size(), 1);
@@ -301,9 +301,9 @@ private slots:
         QCOMPARE(QFileInfo(path).size(), 64LL * 1024 * 1024 + 1);
 
         showthis::LearningService service(nullptr, directory.filePath("words.json"));
-        QVERIFY(service.save_word({}, "word", "", "meaning", "", "original", -1));
+        QVERIFY(service.save_word({}, "word", "", "meaning", "", "original", {}));
         const auto bytes = read(service.storage_path());
-        QVERIFY(!service.save_word({}, "large", "", "meaning", "", QString(17 * 1024 * 1024, 'x'), -1));
+        QVERIFY(!service.save_word({}, "large", "", "meaning", "", QString(17 * 1024 * 1024, 'x'), {}));
         QCOMPARE(read(service.storage_path()), bytes);
         QCOMPARE(service.vocabulary().size(), 1);
     }

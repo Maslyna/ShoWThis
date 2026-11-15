@@ -223,6 +223,172 @@ private slots:
         QCOMPARE(warnings.size(), 0);
     }
 
+    void corrupt_cache_can_be_reset_from_settings_data() {
+        QTest::addColumn<bool>("legacy_cache");
+        QTest::newRow("sidecar") << false;
+        QTest::newRow("legacy-migration") << true;
+    }
+
+    void corrupt_cache_can_be_reset_from_settings() {
+        QFETCH(bool, legacy_cache);
+        QTemporaryDir directory;
+        const auto path = directory.filePath("words.json");
+        const QJsonObject card{{"id", "kept"}, {"word", "kept"}, {"language", "de"}, {"meaning", "keep me"}};
+        QJsonObject notebook{{"version", 1}, {"cards", QJsonArray{card}}, {"dictionary_cache", QJsonObject{}}};
+        if (legacy_cache) {
+            const auto lookup = QJsonDocument::fromJson(free_entry("Haus", "house")).object();
+            notebook.insert("dictionary_cache", QJsonObject{{dictionary_cache_key("de", "Haus"), lookup}});
+        }
+        QFile vocabulary(path);
+        QVERIFY(vocabulary.open(QIODevice::WriteOnly));
+        const auto original = QJsonDocument(notebook).toJson();
+        QCOMPARE(vocabulary.write(original), original.size());
+        vocabulary.close();
+        QFile cache(path + ".lookups.json");
+        QVERIFY(cache.open(QIODevice::WriteOnly));
+        cache.write("corrupt cache");
+        cache.close();
+        showthis::LearningService service(nullptr, path);
+        QCOMPARE(service.vocabulary().size(), 1);
+        QVERIFY(!service.storage_error().isEmpty());
+        QVERIFY(service.dictionary_history().isEmpty());
+        showthis::ShoWSurface surface(nullptr, &service);
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        surface.resize(1100, 800);
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        auto *panel = find_item(surface.contentItem(), "learning_panel");
+        auto *navigation = find_item(surface.contentItem(), "notebook_tabs");
+        QVERIFY(panel && navigation);
+        QVERIFY(QMetaObject::invokeMethod(panel, "open_vocabulary"));
+        navigation->setProperty("current_index", 3);
+        auto *clear = find_item(surface.contentItem(), "clear_history");
+        QVERIFY(clear);
+        QTRY_VERIFY(clear->isVisible() && clear->isEnabled());
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier,
+            clear->mapToScene(QPointF(clear->width() / 2, clear->height() / 2)).toPoint());
+        auto *dialog = surface.rootObject()->findChild<QObject *>("clear_history_confirmation");
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        if (qEnvironmentVariableIsSet("SHOWTHIS_TEST_SCREENSHOTS"))
+            QVERIFY(surface.grabWindow().save(qEnvironmentVariable("SHOWTHIS_TEST_SCREENSHOTS")
+                + "/cache-recovery-" + QTest::currentDataTag() + ".png"));
+        auto *footer = dialog->property("footer").value<QQuickItem *>();
+        QVERIFY(footer);
+        auto *confirm = find_item(footer, "confirm_action");
+        QVERIFY(confirm);
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier,
+            confirm->mapToScene(QPointF(confirm->width() / 2, confirm->height() / 2)).toPoint());
+        QTRY_VERIFY(service.storage_error().isEmpty());
+        QVERIFY(cache.open(QIODevice::ReadOnly));
+        const auto reset = QJsonDocument::fromJson(cache.readAll()).object();
+        QCOMPARE(reset.value("format").toString(), QString("showthis-lookup-cache"));
+        QVERIFY(reset.value("dictionary_cache").toObject().isEmpty());
+        cache.close();
+        QCOMPARE(service.vocabulary()[0].toMap().value("id").toString(), QString("kept"));
+        QVERIFY(vocabulary.open(QIODevice::ReadOnly));
+        QCOMPARE(vocabulary.readAll(), original);
+        vocabulary.close();
+        QVERIFY(service.save_word("kept", "kept", "", "keep me", "", "saved after reset", {}));
+        showthis::LearningService reopened(nullptr, path);
+        QVERIFY(reopened.storage_error().isEmpty());
+        QCOMPARE(reopened.vocabulary()[0].toMap().value("notes").toString(), QString("saved after reset"));
+    }
+
+    void chosen_meaning_survives_lookup_changes_data() {
+        QTest::addColumn<QString>("change");
+        for (const auto *change : {"refresh", "failed-refresh", "cached-lookup", "sources", "word", "language"})
+            QTest::newRow(change) << QString::fromLatin1(change);
+    }
+
+    void chosen_meaning_survives_lookup_changes() {
+        QFETCH(QString, change);
+        QTemporaryDir directory;
+        TestNetwork network;
+        network.response = free_entry("Haus", "original meaning");
+        const auto path = directory.filePath("words.json");
+        showthis::LearningService service(nullptr, path, &network);
+        service.set_source_language("de");
+        showthis::ShoWSurface surface(nullptr, &service);
+        QCOMPARE(surface.status(), QQuickView::Ready);
+        QSignalSpy warnings(surface.engine(), &QQmlEngine::warnings);
+        surface.resize(1100, 800);
+        surface.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        auto *panel = find_item(surface.contentItem(), "learning_panel");
+        QVERIFY(panel);
+        QVERIFY(QMetaObject::invokeMethod(panel, "open_word", Q_ARG(QString, QString("Haus")), Q_ARG(QString, QString{})));
+        auto *lookup = find_item(surface.contentItem(), "lookup_dictionary");
+        auto *refresh = find_item(surface.contentItem(), "refresh_dictionary");
+        auto *meaning = find_item(surface.contentItem(), "word_meaning");
+        auto *word = find_item(surface.contentItem(), "lookup_word");
+        auto *save = find_item(surface.contentItem(), "save_word");
+        QVERIFY(lookup && refresh && meaning && word && save);
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier,
+            lookup->mapToScene(QPointF(lookup->width() / 2, lookup->height() / 2)).toPoint());
+        QTRY_VERIFY(!service.dictionary_busy());
+        QCOMPARE(service.senses().size(), 1);
+        const auto selected = service.senses()[0].toMap();
+        QTRY_VERIFY(find_item(surface.contentItem(), "dictionary_sense_0"));
+        auto *sense = find_item(surface.contentItem(), "dictionary_sense_0");
+        QTRY_VERIFY(sense->isVisible());
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier,
+            sense->mapToScene(QPointF(sense->width() / 2, sense->height() / 2)).toPoint());
+        QCOMPARE(meaning->property("text").toString(), QString("original meaning"));
+        const bool reset_word = change == "word" || change == "language";
+        if (change == "sources") {
+            QVERIFY(service.configure_dictionaries({dictionary_selection("kaikki", {"ru"})}, true));
+        } else if (change == "word") {
+            word->forceActiveFocus();
+            QTest::keyClick(&surface, Qt::Key_A, Qt::ControlModifier);
+            for (const auto key : {Qt::Key_B, Qt::Key_A, Qt::Key_U, Qt::Key_M})
+                QTest::keyClick(&surface, key);
+        } else if (change == "language") {
+            auto *language = find_item(surface.contentItem(), "lookup_language");
+            QVERIFY(language);
+            language->setProperty("editText", "fr");
+            QVERIFY(QMetaObject::invokeMethod(language, "accepted"));
+        } else {
+            network.response = free_entry("Haus", "replacement meaning");
+            if (change == "failed-refresh") network.status = 503;
+            auto *button = change == "cached-lookup" ? lookup : refresh;
+            QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier,
+                button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+            QTRY_VERIFY(!service.dictionary_busy());
+        }
+        if (reset_word) {
+            QVERIFY(meaning->property("text").toString().isEmpty());
+            meaning->setProperty("text", "manual meaning");
+        } else {
+            QCOMPARE(meaning->property("text").toString(), QString("original meaning"));
+        }
+        QTRY_VERIFY(save->isEnabled());
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier,
+            save->mapToScene(QPointF(save->width() / 2, save->height() / 2)).toPoint());
+        QCOMPARE(service.vocabulary().size(), 1);
+        const auto card = service.vocabulary()[0].toMap();
+        if (reset_word) {
+            QVERIFY(card.value("source").toMap().isEmpty());
+            QVERIFY(card.value("sense").toMap().isEmpty());
+        } else {
+            QCOMPARE(card.value("source"), selected.value("source"));
+            QCOMPARE(card.value("sense").toMap(), selected);
+            showthis::LearningService reopened(nullptr, path, &network);
+            QCOMPARE(reopened.vocabulary()[0].toMap().value("source"), selected.value("source"));
+            const auto destination = directory.filePath("anki.txt");
+            QVERIFY(service.export_anki(QUrl::fromLocalFile(destination)));
+            QFile exported(destination);
+            QVERIFY(exported.open(QIODevice::ReadOnly));
+            const auto bytes = exported.readAll();
+            QVERIFY(bytes.contains("original meaning"));
+            QVERIFY(!bytes.contains("replacement meaning"));
+            QVERIFY(bytes.contains("FreeDictionaryAPI.com"));
+            QVERIFY(bytes.contains("CC BY-SA 4.0"));
+            QVERIFY(bytes.contains("https://en.wiktionary.org/wiki/Haus"));
+        }
+        QCOMPARE(warnings.size(), 0);
+    }
+
     void responsive_notebook_data() {
         QTest::addColumn<QSize>("size");
         QTest::addColumn<bool>("dark");
@@ -635,9 +801,9 @@ private slots:
         QTemporaryDir directory;
         const auto store_path = directory.filePath("words.json");
         showthis::LearningService service(nullptr, store_path);
-        QVERIFY(service.save_word({}, "Haus", "", "house", "", "", -1));
+        QVERIFY(service.save_word({}, "Haus", "", "house", "", "", {}));
         const auto selected_id = service.vocabulary()[0].toMap().value("id").toString();
-        QVERIFY(service.save_word({}, "Baum", "", "tree", "", "", -1));
+        QVERIFY(service.save_word({}, "Baum", "", "tree", "", "", {}));
         showthis::ShoWSurface surface(nullptr, &service);
         TestCaptureBackend backend;
         showthis::OverlayController controller(surface, backend,
@@ -906,7 +1072,7 @@ private slots:
             showthis::LearningService original(nullptr, path);
             original.translator()->set_provider_id("deepl");
             original.translator()->set_option("api_key", "session-only");
-            QVERIFY(original.save_word({}, "Haus", "", "", "saved translation", "original notes", -1));
+            QVERIFY(original.save_word({}, "Haus", "", "", "saved translation", "original notes", {}));
         }
         TestNetwork network;
         showthis::LearningService service(nullptr, path, &network);

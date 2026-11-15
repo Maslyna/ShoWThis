@@ -27,6 +27,7 @@ public:
 private:
     DictionaryRequest index_request(const QString &word, const QString &edition, int prefix_length) const;
     static QString edition_path(const QString &edition);
+    static DictionaryRequestBoundary request_boundary(const QString &edition, bool entry);
     QPointer<KaikkiOfflineStore> m_offline;
     std::unique_ptr<KaikkiOfflineStore> m_owned_offline;
 };

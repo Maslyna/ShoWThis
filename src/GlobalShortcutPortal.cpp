@@ -5,6 +5,7 @@
 #include <QDBusPendingCallWatcher>
 #include <QDBusPendingReply>
 #include <QDBusServiceWatcher>
+#include <QDBusVariant>
 #include <QFile>
 #include <QUuid>
 #include <QRegularExpression>
@@ -43,10 +44,15 @@ GlobalShortcutPortal::GlobalShortcutPortal(QObject *parent, int timeout_ms,
     m_deadline.setSingleShot(true);
     m_deadline.setInterval(qMax(1, timeout_ms));
     connect(&m_deadline, &QTimer::timeout, this, [this]() {
-        fail(tr("Global shortcut setup timed out. Use Capture screen or Retry shortcut setup in the tray menu."));
+        if (m_phase == Phase::Configuring)
+            configuration_failed(tr("The desktop portal did not answer the configuration request."));
+        else
+            fail(tr("Global shortcut setup timed out. Use Capture screen or Retry shortcut setup in the tray menu."));
     });
     m_bus.connect(m_service, DESKTOP_PORTAL_PATH, GSHORTCUT_PORTAL_IFACE, "Activated", this,
         SLOT(on_activated(QDBusMessage)));
+    m_bus.connect(m_service, DESKTOP_PORTAL_PATH, GSHORTCUT_PORTAL_IFACE, "ShortcutsChanged", this,
+        SLOT(on_shortcuts_changed(QDBusMessage)));
     auto *watcher = new QDBusServiceWatcher(m_service, m_bus, QDBusServiceWatcher::WatchForOwnerChange, this);
     connect(watcher, &QDBusServiceWatcher::serviceOwnerChanged, this,
         [this](const QString &, const QString &, const QString &owner) {
@@ -67,7 +73,7 @@ void GlobalShortcutPortal::reset() {
         m_bus.asyncCall(close);
     }
     if (!m_session.isEmpty()) {
-        m_bus.disconnect(m_service, m_session, "org.freedesktop.portal.Session", "Closed", this, SLOT(on_session_closed()));
+        m_bus.disconnect(m_service, m_session, "org.freedesktop.portal.Session", "Closed", this, SLOT(on_session_closed(QDBusMessage)));
         auto close = QDBusMessage::createMethodCall(m_service, m_session, "org.freedesktop.portal.Session", "Close");
         m_bus.asyncCall(close);
     }
@@ -83,8 +89,20 @@ void GlobalShortcutPortal::fail(const QString &message) {
     emit state_changed();
 }
 
-void GlobalShortcutPortal::start() {
+void GlobalShortcutPortal::start() { begin(false); }
+
+void GlobalShortcutPortal::retry() {
+    if (m_phase != Phase::Idle && m_phase != Phase::Active)
+        return;
+    if (!m_session.isEmpty())
+        configure_shortcuts();
+    else
+        begin(true);
+}
+
+void GlobalShortcutPortal::begin(bool configure) {
     reset();
+    m_configure_on_bind = configure;
     m_error.clear();
     emit state_changed();
     if (QFile::exists("/.flatpak-info")) {
@@ -107,6 +125,80 @@ void GlobalShortcutPortal::start() {
         // if registration actually was required or unavailable.
         create_session();
     });
+}
+
+void GlobalShortcutPortal::configuration_failed(const QString &detail) {
+    ++m_generation;
+    m_deadline.stop();
+    m_phase = Phase::Active;
+    m_error = tr("Open System Settings > Keyboard > Shortcuts, select ShoWThis, and assign a key to "
+        "Show or hide the screen overlay. Capture screen in the tray remains available.");
+    if (!detail.isEmpty())
+        m_error = detail + ' ' + m_error;
+    emit state_changed();
+}
+
+void GlobalShortcutPortal::configure_shortcuts() {
+    m_phase = Phase::Configuring;
+    m_error.clear();
+    emit state_changed();
+    const auto generation = ++m_generation;
+    m_deadline.start();
+    auto message = QDBusMessage::createMethodCall(m_service, DESKTOP_PORTAL_PATH,
+        "org.freedesktop.DBus.Properties", "Get");
+    message << GSHORTCUT_PORTAL_IFACE << QStringLiteral("version");
+    auto *watcher = new QDBusPendingCallWatcher(m_bus.asyncCall(message, m_deadline.interval()), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher, generation]() {
+        watcher->deleteLater();
+        if (generation != m_generation)
+            return;
+        const QDBusPendingReply<QDBusVariant> version = *watcher;
+        if (version.isError() || version.value().variant().toUInt() < 2) {
+            configuration_failed(tr("This desktop portal cannot open shortcut configuration."));
+            return;
+        }
+        auto configure = QDBusMessage::createMethodCall(m_service, DESKTOP_PORTAL_PATH,
+            GSHORTCUT_PORTAL_IFACE, "ConfigureShortcuts");
+        configure << QVariant::fromValue(QDBusObjectPath(m_session)) << QString{} << QVariantMap{};
+        auto *configured = new QDBusPendingCallWatcher(m_bus.asyncCall(configure, m_deadline.interval()), this);
+        connect(configured, &QDBusPendingCallWatcher::finished, this, [this, configured, generation]() {
+            configured->deleteLater();
+            if (generation != m_generation)
+                return;
+            const QDBusPendingReply<> reply = *configured;
+            if (reply.isError()) {
+                configuration_failed(tr("Cannot open shortcut configuration: %1").arg(reply.error().message()));
+                return;
+            }
+            ++m_generation;
+            m_deadline.stop();
+            m_phase = Phase::Active;
+            // ConfigureShortcuts only opens settings; it does not grant a binding.
+            // Keep this session alive to receive the user's ShortcutsChanged update.
+            if (!m_ready)
+                m_error = tr("Shortcut configuration opened. Assign a key to Show or hide the screen overlay. "
+                    "Capture screen in the tray remains available.");
+            emit state_changed();
+        });
+    });
+}
+
+void GlobalShortcutPortal::update_shortcuts(const QList<ShortcutDescription> &shortcuts) {
+    int matches = 0;
+    bool usable = false;
+    for (const auto &shortcut : shortcuts) {
+        if (shortcut.id != QStringLiteral("toggle-window"))
+            continue;
+        ++matches;
+        const auto trigger = shortcut.options.value("trigger_description");
+        // This is localized display text, not a portable key-sequence string.
+        usable = trigger.metaType() == QMetaType::fromType<QString>() && !trigger.toString().trimmed().isEmpty();
+    }
+    m_ready = matches == 1 && usable;
+    m_error = m_ready ? QString{} : tr("No usable global shortcut is assigned. Choose Retry shortcut setup in the tray "
+        "to configure it, or open System Settings > Keyboard > Shortcuts > ShoWThis. "
+        "Capture screen in the tray remains available.");
+    emit state_changed();
 }
 
 void GlobalShortcutPortal::create_session() {
@@ -151,7 +243,17 @@ void GlobalShortcutPortal::on_response(const QDBusMessage &message) {
     }
     const auto args = message.arguments();
     if (args[0].toUInt() != 0) {
-        fail(tr("Global shortcut permission was denied or cancelled. Use the tray menu to capture or retry."));
+        if (m_phase == Phase::Binding) {
+            m_bus.disconnect(m_service, m_request, REQUEST_IFACE, "Response", this, SLOT(on_response(QDBusMessage)));
+            m_request.clear();
+            ++m_generation;
+            m_deadline.stop();
+            m_phase = Phase::Active;
+            m_configure_on_bind = false;
+            update_shortcuts({});
+        } else {
+            fail(tr("Global shortcut permission was denied or cancelled. Use the tray menu to capture or retry."));
+        }
         return;
     }
     m_bus.disconnect(m_service, m_request, REQUEST_IFACE, "Response", this, SLOT(on_response(QDBusMessage)));
@@ -167,7 +269,7 @@ void GlobalShortcutPortal::on_response(const QDBusMessage &message) {
             fail(tr("The desktop portal returned an invalid session handle."));
             return;
         }
-        m_bus.connect(m_service, m_session, "org.freedesktop.portal.Session", "Closed", this, SLOT(on_session_closed()));
+        m_bus.connect(m_service, m_session, "org.freedesktop.portal.Session", "Closed", this, SLOT(on_session_closed(QDBusMessage)));
         const auto handle = token();
         const QList<ShortcutDescription> shortcuts{{"toggle-window", {{"description", tr("Show or hide the screen overlay")},
             {"preferred_trigger", "CTRL+ALT+SPACE"}}}};
@@ -176,13 +278,18 @@ void GlobalShortcutPortal::on_response(const QDBusMessage &message) {
     } else {
         ++m_generation;
         m_deadline.stop();
-        m_phase = Phase::Ready;
-        m_ready = true;
-        emit state_changed();
+        m_phase = Phase::Active;
+        const auto results = qdbus_cast<QVariantMap>(args[1]);
+        update_shortcuts(qdbus_cast<QList<ShortcutDescription>>(results.value("shortcuts")));
+        if (m_configure_on_bind && !m_ready)
+            configure_shortcuts();
+        m_configure_on_bind = false;
     }
 }
 
-void GlobalShortcutPortal::on_session_closed() {
+void GlobalShortcutPortal::on_session_closed(const QDBusMessage &message) {
+    if (message.path() != m_session)
+        return;
     fail(tr("The global shortcut session was closed. Retry setup from the tray menu."));
 }
 
@@ -192,6 +299,25 @@ void GlobalShortcutPortal::on_activated(const QDBusMessage &message) {
         return;
     if (args[0].value<QDBusObjectPath>().path() == m_session && args[1].toString() == "toggle-window")
         emit shortcut_activated(args[1].toString());
+}
+
+void GlobalShortcutPortal::on_shortcuts_changed(const QDBusMessage &message) {
+    const auto args = message.arguments();
+    if (args.size() != 2 || message.signature() != "oa(sa{sv})"
+        || args[0].value<QDBusObjectPath>().path() != m_session
+        || (m_phase != Phase::Active && m_phase != Phase::Configuring))
+        return;
+    const auto shortcuts = qdbus_cast<QList<ShortcutDescription>>(args[1]);
+    // Changed may describe only a subset; an unrelated action cannot revoke ours.
+    for (const auto &shortcut : shortcuts) {
+        if (shortcut.id == QStringLiteral("toggle-window")) {
+            ++m_generation;
+            m_deadline.stop();
+            m_phase = Phase::Active;
+            update_shortcuts(shortcuts);
+            return;
+        }
+    }
 }
 
 }  // namespace showthis

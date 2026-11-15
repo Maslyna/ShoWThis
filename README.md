@@ -31,7 +31,10 @@ remain installed; this is not a self-contained portable bundle.
 
 Use **Ctrl+Alt+Space** for the overlay. If portal permission is denied or setup
 fails, the tray menu provides **Capture screen**, **My vocabulary**, and **Retry
-shortcut setup**. Launching a second instance opens the running notebook.
+shortcut setup**. Retry opens shortcut configuration on version-2 portals;
+older portals provide directions to KDE's shortcut settings. Setup is ready only
+when the overlay action has an assigned trigger. Launching a second instance
+opens the running notebook.
 
 ## Data and cache
 
@@ -47,8 +50,10 @@ remain readable; embedded lookups are retained until safely migrated.
   even after changing offline policy or removing a downloaded pack.
 - Vocabulary saves remain atomic and synchronous, with a 16 MiB output limit.
   Input limits are 64 MiB for legacy notebooks and 32 MiB for lookup sidecars.
-- Invalid vocabulary is never silently repaired or overwritten. An unreadable
-  cache does not prevent vocabulary saves; explicitly clear history to reset it.
+- Invalid vocabulary is never silently repaired or overwritten. Reset an unreadable
+  cache using **Settings → Clear history**, which remains available with empty
+  history. Vocabulary saves remain independent of cache errors except while
+  safely migrating embedded legacy lookups.
 
 See [architecture](docs/architecture.md), [dictionaries](docs/dictionaries.md),
 and the [desktop verification checklist](docs/desktop-testing.md).

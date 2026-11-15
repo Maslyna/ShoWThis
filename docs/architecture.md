@@ -7,9 +7,12 @@ edited normally before lookup or saving.
 ## UI
 
 - `LearningPanel.qml` owns navigation, confirmations, and the export dialog.
-- `NotebookWordEditor.qml` owns the current draft and lookup workflow. Loading a
-  card suppresses dirty tracking; opening another card goes through the panel's
-  unsaved-change confirmation.
+- `NotebookWordEditor.qml` owns the current draft and lookup workflow, including
+  a snapshot of the chosen dictionary sense and its attribution. Saving passes
+  this snapshot, not an index into mutable lookup results. Refreshing or changing
+  sources preserves it; editing the word or its language clears it with the copied
+  fields. Loading a card suppresses dirty tracking; opening another card goes
+  through the panel's unsaved-change confirmation.
 - `NotebookDictionary.qml` displays dictionary results.
 - Anki export uses Qt's standard `QFileDialog`, with native dialogs enabled.
   `ShoWSurface` hides the layer-shell overlay and releases keyboard focus before
@@ -73,6 +76,8 @@ for tests; the caller retains ownership of an injected service.
   shutdown flushes the latest snapshot. Cache failures do not block vocabulary
   saves, except when flushing is needed to safely migrate an embedded legacy
   cache. Explicit history clearing/limit changes wait for successful persistence.
+  Clear history remains available with empty history so an unreadable sidecar can
+  be reset explicitly, including before a blocked legacy migration.
   Limits are 16 MiB total and 1 MiB per result, in addition to the entry count.
 - `NotebookListModel` exposes typed identity/word roles with precomputed C++ search
   text for vocabulary and history. QML no longer copies and filters full arrays

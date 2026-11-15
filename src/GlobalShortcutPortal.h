@@ -22,6 +22,7 @@ public:
         const QString &service = QStringLiteral("org.freedesktop.portal.Desktop"));
     ~GlobalShortcutPortal() override;
     void start();
+    void retry();
     bool ready() const { return m_ready; }
     QString error() const { return m_error; }
     static QString request_path(const QString &unique_name, const QString &token);
@@ -33,11 +34,16 @@ signals:
 private slots:
     void on_response(const QDBusMessage &message);
     void on_activated(const QDBusMessage &message);
-    void on_session_closed();
+    void on_shortcuts_changed(const QDBusMessage &message);
+    void on_session_closed(const QDBusMessage &message);
 
 private:
-    enum class Phase { Idle, Registering, Creating, Binding, Ready };
+    enum class Phase { Idle, Registering, Creating, Binding, Configuring, Active };
+    void begin(bool configure);
     void create_session();
+    void configure_shortcuts();
+    void update_shortcuts(const QList<ShortcutDescription> &shortcuts);
+    void configuration_failed(const QString &detail = {});
     void request(const QString &method, QList<QVariant> arguments, const QString &token, Phase phase);
     void reset();
     void fail(const QString &message);
@@ -50,6 +56,7 @@ private:
     quint64 m_generation = 0;
     Phase m_phase = Phase::Idle;
     bool m_ready = false;
+    bool m_configure_on_bind = false;
 };
 
 }  // namespace showthis

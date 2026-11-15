@@ -8,6 +8,7 @@ ColumnLayout {
     required property bool wide_layout
     property string card_id: ""
     property int selected_sense: -1
+    property var draft_sense: ({})
     property var saved_source: ({})
     property bool dirty: false
     property bool loading: false
@@ -16,8 +17,8 @@ ColumnLayout {
     property bool lookup_attempted: false
     property alias word_prefix: card_form.word_prefix
     readonly property bool busy: service.dictionary_busy || service.translator.busy
-    readonly property var active_source: current_sense.source && current_sense.source.url ? current_sense.source
-        : service.source.url ? service.source : saved_source
+    readonly property var active_source: draft_sense.source && draft_sense.source.url ? draft_sense.source
+        : saved_source.url ? saved_source : service.source
     readonly property var current_sense: selected_sense >= 0 && selected_sense < service.senses.length
         ? service.senses[selected_sense] : ({})
     readonly property bool can_save: !busy && word_input.text.trim().length > 0
@@ -44,6 +45,7 @@ ColumnLayout {
         service.clear()
         card_id = card.id || ""
         saved_source = card.source || ({})
+        draft_sense = card.sense || ({})
         selected_sense = -1
         // Existing cards are never normalized merely by opening them.
         word_input.text = card.id ? card.word : (action.word || "").trim()
@@ -65,6 +67,7 @@ ColumnLayout {
         service.clear()
         selected_sense = -1
         saved_source = ({})
+        draft_sense = ({})
         lookup_attempted = false
         card_form.word_prefix = ""
         card_form.load_forms({})
@@ -87,6 +90,7 @@ ColumnLayout {
         // the newly chosen sense has the same headword.
         service.translator.clear()
         selected_sense = index
+        draft_sense = current_sense
         if (current_sense.headword) word_input.text = current_sense.headword
         card_form.meaning = current_sense.definition || ""
         card_form.translation = native_translation(current_sense)
@@ -104,7 +108,7 @@ ColumnLayout {
         if (!can_save) return
         if (service.save_word(card_id, word_input.text, context_input.text,
                 card_form.meaning, card_form.translation,
-                card_form.notes, selected_sense, card_form.word_prefix, card_form.word_forms())) {
+                card_form.notes, draft_sense, card_form.word_prefix, card_form.word_forms())) {
             if (card_id.length === 0) card_id = service.vocabulary[0].id
             dirty = false
         }
@@ -297,7 +301,7 @@ ColumnLayout {
                     Layout.preferredHeight: parent.card_height
                     onEdited: editor.mark_dirty()
                     onTranslation_language_changed: {
-                        translation = editor.native_translation(editor.current_sense)
+                        translation = editor.native_translation(editor.draft_sense)
                         editor.mark_dirty()
                     }
                     onTranslate_requested: editor.service.translate(word_input.text, context_input.text)

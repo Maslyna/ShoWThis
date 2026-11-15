@@ -205,11 +205,26 @@ void DictionaryLookup::lookup(const QString &word, const QString &language, cons
 }
 
 void DictionaryLookup::send(DictionaryRequest request, ResponseHandler handler) {
+    if (request.boundary && !request.boundary->allows(request.request.url())) {
+        handler({}, 0, tr("Dictionary request URL is not allowed."), QNetworkReply::ContentAccessDenied);
+        return;
+    }
+    if (request.boundary)
+        request.request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::UserVerifiedRedirectPolicy);
     request.request.setTransferTimeout(15000);
     request.request.setRawHeader("User-Agent", "ShoWThis/1.0 (personal vocabulary learner)");
     auto *reply = m_network->sendCustomRequest(request.request, request.method, request.body);
     m_replies.insert(reply);
     connect(reply, &QObject::destroyed, this, [this, reply]() { m_replies.remove(reply); });
+    if (request.boundary) {
+        connect(reply, &QNetworkReply::redirected, this,
+            [reply, boundary = std::move(*request.boundary)](const QUrl &destination) {
+                if (boundary.allows(reply->url().resolved(destination)))
+                    reply->redirectAllowed();
+                else
+                    reply->abort();
+            });
+    }
     connect(reply, &QNetworkReply::readyRead, this, [reply]() {
         if (reply->bytesAvailable() > 8 * 1024 * 1024)
             reply->abort();

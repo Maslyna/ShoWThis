@@ -23,15 +23,42 @@ QJsonArray form_links(const QJsonObject &sense) {
         if (!word.trimmed().isEmpty())
             result.append(QJsonObject{{"word", word.trimmed()}});
     }
-    // FreeDictionary currently flattens Wiktionary's form_of into a tagged
-    // English definition. Follow only an explicit form relationship, not an
-    // arbitrary definition containing the word "of".
+    // FreeDictionary flattens Wiktionary's form_of into a tagged English
+    // definition. Recognize its trailing romanization and ": explanation"
+    // shapes, but never guess how to split ambiguous lists of headwords.
     const auto tags = sense.value("tags").toVariant().toStringList();
     if (result.isEmpty() && (tags.contains("form of") || tags.contains("form-of"))) {
         static const QRegularExpression reference("\\bof\\s+(.+?)\\.?$");
+        static const QRegularExpression explanation("^([^:\\r\\n]+): [^:\\r\\n]+$");
+        static const QRegularExpression romanization(
+            "^(.+) \\(([\\p{Latin}\\p{M}\\p{N} '\\x{2019}-]+)\\)$");
+        static const QRegularExpression latin_letter("\\p{Latin}");
+        static const QRegularExpression non_latin_letter("(?!\\p{Latin})\\p{L}");
+        static const QRegularExpression literal_target(
+            "^[\\p{L}\\p{M}\\p{N}]+(?:[ '\\x{2019}-][\\p{L}\\p{M}\\p{N}]+)*$");
+        static const QRegularExpression conjunction("\\b(?:and|or)\\b", QRegularExpression::CaseInsensitiveOption);
         const auto match = reference.match(sense.value("definition").toString());
-        if (match.hasMatch())
-            result.append(QJsonObject{{"word", match.captured(1).trimmed()}});
+        auto target = match.captured(1).trimmed();
+        if (target.contains(':')) {
+            const auto annotated = explanation.match(target);
+            if (!annotated.hasMatch())
+                return result;
+            target = annotated.captured(1).trimmed();
+        }
+        if (target.contains('(') || target.contains(')')) {
+            const auto annotated = romanization.match(target);
+            const auto headword = annotated.captured(1).trimmed();
+            // A Latin or mixed-script parenthetical may be part of the name
+            // or a usage note. Only the provider's non-Latin/Latin pairing is
+            // sufficiently specific to identify a romanization here.
+            if (!annotated.hasMatch() || latin_letter.match(headword).hasMatch()
+                || !non_latin_letter.match(headword).hasMatch()
+                || !latin_letter.match(annotated.captured(2)).hasMatch())
+                return result;
+            target = headword;
+        }
+        if (match.hasMatch() && literal_target.match(target).hasMatch() && !conjunction.match(target).hasMatch())
+            result.append(QJsonObject{{"word", target}});
     }
     return result;
 }

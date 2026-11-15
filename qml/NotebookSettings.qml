@@ -54,9 +54,9 @@ ScrollView {
                         Layout.fillWidth: true
                     }
                     NotebookButton {
+                        objectName: "clear_history"
                         text: qsTr("Clear history…")
                         quiet: true
-                        enabled: settings_page.service.dictionary_history.length > 0
                         onClicked: history_confirmation.open()
                     }
                 }
@@ -114,6 +114,7 @@ ScrollView {
 
     NotebookConfirm {
         id: history_confirmation
+        objectName: "clear_history_confirmation"
         palette: settings_page.palette
         title: qsTr("Clear lookup history?")
         description: qsTr("Recent lookups and cached definitions will be removed. Your saved word cards will be kept.")

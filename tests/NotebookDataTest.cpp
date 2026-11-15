@@ -96,6 +96,179 @@ private slots:
         QVERIFY(sense.value("article").toString().isEmpty());
     }
 
+    void free_dictionary_literal_form_targets_data() {
+        QTest::addColumn<QString>("word");
+        QTest::addColumn<QString>("language");
+        QTest::addColumn<QString>("definition");
+        QTest::addColumn<QStringList>("targets");
+        // Published FreeDictionary senses, without structured form_of links.
+        QTest::newRow("russian-genitive") << u"дома"_s << u"ru"_s
+            << u"genitive singular of дом (dom)"_s << QStringList{u"дом"_s};
+        QTest::newRow("russian-plural") << u"дома"_s << u"ru"_s
+            << u"nominative/accusative plural of дом (dom)"_s << QStringList{u"дом"_s};
+        QTest::newRow("better-multiple-targets") << u"better"_s << u"en"_s
+            << u"comparative degree of good and well"_s << QStringList{};
+        QTest::newRow("better-explanation") << u"better"_s << u"en"_s
+            << u"comparative form of well: more well"_s << QStringList{u"well"_s};
+        QTest::newRow("literal-multiword") << u"attorneys general"_s << u"en"_s
+            << u"plural of attorney general"_s << QStringList{u"attorney general"_s};
+        QTest::newRow("literal-hyphenated") << u"mothers-in-law"_s << u"en"_s
+            << u"plural of mother-in-law."_s << QStringList{u"mother-in-law"_s};
+        QTest::newRow("literal-multiword-with-of") << u"Secretaries of State"_s << u"en"_s
+            << u"plural of Secretary of State"_s << QStringList{u"Secretary of State"_s};
+        QTest::newRow("non-latin-multiword") << u"белого дома"_s << u"ru"_s
+            << u"genitive singular of белый дом (belyj dom)"_s << QStringList{u"белый дом"_s};
+        QTest::newRow("ambiguous-conjunction") << u"forms"_s << u"en"_s
+            << u"plural of rock and roll"_s << QStringList{};
+        QTest::newRow("ambiguous-disjunction") << u"forms"_s << u"en"_s
+            << u"plural of house or home"_s << QStringList{};
+        QTest::newRow("ambiguous-comma") << u"forms"_s << u"en"_s
+            << u"plural of house, home"_s << QStringList{};
+        QTest::newRow("ambiguous-slash") << u"forms"_s << u"en"_s
+            << u"plural of house/home"_s << QStringList{};
+        QTest::newRow("ambiguous-colon") << u"forms"_s << u"en"_s
+            << u"plural of house:home"_s << QStringList{};
+        QTest::newRow("ambiguous-nested-colon") << u"forms"_s << u"en"_s
+            << u"plural of house: home: building"_s << QStringList{};
+        QTest::newRow("empty-colon-explanation") << u"forms"_s << u"en"_s
+            << u"plural of house: "_s << QStringList{};
+        QTest::newRow("latin-parenthetical") << u"forms"_s << u"en"_s
+            << u"plural of house (building)"_s << QStringList{};
+        QTest::newRow("mixed-script-parenthetical") << u"forms"_s << u"ru"_s
+            << u"genitive singular of дом (dom дом)"_s << QStringList{};
+        QTest::newRow("parenthetical-commentary") << u"forms"_s << u"ru"_s
+            << u"genitive singular of дом (house, building)"_s << QStringList{};
+        QTest::newRow("non-latin-parenthetical") << u"forms"_s << u"ru"_s
+            << u"genitive singular of дом (дом)"_s << QStringList{};
+    }
+
+    void free_dictionary_literal_form_targets() {
+        QFETCH(QString, word);
+        QFETCH(QString, language);
+        QFETCH(QString, definition);
+        QFETCH(QStringList, targets);
+        const QJsonObject raw{{"word", word}, {"entries", QJsonArray{
+            QJsonObject{{"language", QJsonObject{{"code", language}}}, {"partOfSpeech", "noun"},
+                {"senses", QJsonArray{QJsonObject{{"definition", definition},
+                    {"tags", QJsonArray{"form of"}}}}}}}}};
+        const auto document = showthis::free_dictionary_document(raw, word, language);
+        QCOMPARE(showthis::dictionary_form_targets(document, language), targets);
+        const auto senses = showthis::dictionary_senses(document, language);
+        QCOMPARE(senses.size(), 1);
+        const auto sense = senses[0].toMap();
+        QCOMPARE(sense.value("definition").toString(), definition);
+        QCOMPARE(sense.value("base_form").toString(), targets.isEmpty() ? QString{} : targets.first());
+        QVERIFY(!showthis::has_dictionary_meanings(document, language));
+        auto ordinary = raw;
+        auto entry = ordinary.value("entries").toArray()[0].toObject();
+        entry.insert("senses", QJsonArray{QJsonObject{{"definition", definition}}});
+        ordinary.insert("entries", QJsonArray{entry});
+        QVERIFY(showthis::dictionary_form_targets(
+            showthis::free_dictionary_document(ordinary, word, language), language).isEmpty());
+    }
+
+    void free_dictionary_structured_form_targets_are_authoritative() {
+        const QStringList targets{u"rock and roll"_s, u"AC/DC"_s, u"дом (dom)"_s, u"well: more well"_s};
+        QJsonArray links;
+        for (const auto &target : targets)
+            links.append(QJsonObject{{"word", target}});
+        for (const auto &key : {"form_of", "formOf"}) {
+            const QJsonObject sense{{"definition", "comparative degree of good and well"},
+                {"tags", QJsonArray{"form of"}}, {key, links}};
+            const QJsonObject raw{{"word", "observed"}, {"entries", QJsonArray{
+                QJsonObject{{"language", QJsonObject{{"code", "en"}}}, {"partOfSpeech", "noun"},
+                    {"senses", QJsonArray{sense}}}}}};
+            const auto document = showthis::free_dictionary_document(raw, "observed", "en");
+            QCOMPARE(showthis::dictionary_form_targets(document, "en"), targets);
+            const auto normalized = showthis::dictionary_senses(document, "en")[0].toMap();
+            QCOMPARE(normalized.value("definition").toString(), sense.value("definition").toString());
+            QVERIFY(normalized.value("base_form").toString().isEmpty());
+        }
+    }
+
+    void finnish_missing_case_forms_preserve_numbers() {
+        // Reduced FreeDictionary talo table: these singular cases have no
+        // form, but the nominative singular and plural are both supplied.
+        const QJsonArray forms{
+            QJsonObject{{"word", "talo"}, {"tags", QJsonArray{"nominative", "singular"}}},
+            QJsonObject{{"word", "talot"}, {"tags", QJsonArray{"nominative", "plural"}}},
+            QJsonObject{{"word", "-"}, {"tags", QJsonArray{"instructive", "singular"}}},
+            QJsonObject{{"word", "-"}, {"tags", QJsonArray{"comitative", "singular"}}}};
+        const QJsonObject entry{{"language", QJsonObject{{"code", "fi"}}}, {"partOfSpeech", "noun"},
+            {"forms", forms}, {"senses", QJsonArray{QJsonObject{{"definition", "house"}}}}};
+        const QJsonObject raw{{"word", "talo"}, {"entries", QJsonArray{entry}}};
+        const auto document = showthis::free_dictionary_document(raw, "talo", "fi");
+        const auto sense = showthis::dictionary_senses(document, "fi")[0].toMap();
+        QCOMPARE(sense.value("singular_status").toString(), QString("available"));
+        QCOMPARE(sense.value("plural_status").toString(), QString("available"));
+        QCOMPARE(sense.value("singular_forms").toStringList(), QStringList{"talo"});
+        QCOMPARE(sense.value("plural_forms").toStringList(), QStringList{"talot"});
+        QVERIFY(sense.value("unavailable_numbers").toStringList().isEmpty());
+        QCOMPARE(sense.value("forms").toList(), forms.toVariantList());
+        QVERIFY(showthis::number_availability_text(sense).isEmpty());
+        QVERIFY(!showthis::AnkiExporter::format_card(sense).contains("No singular"));
+    }
+
+    void missing_number_markers_require_unqualified_evidence_data() {
+        QTest::addColumn<QStringList>("missing_tags");
+        QTest::addColumn<QString>("marker");
+        QTest::addColumn<QString>("unavailable");
+        QTest::newRow("instructive") << QStringList{"instructive", "singular"} << QString("-") << QString{};
+        QTest::newRow("comitative") << QStringList{"comitative", "singular"} << QString("-") << QString{};
+        QTest::newRow("nominative") << QStringList{"nominative", "singular"} << QString("-") << QString{};
+        QTest::newRow("unlisted-case") << QStringList{"adessive", "plural"} << QString("-") << QString{};
+        QTest::newRow("possessive") << QStringList{"singular", "possessive"} << QString("-") << QString{};
+        QTest::newRow("qualified-frequency") << QStringList{"plural", "usually"} << QString("-") << QString{};
+        QTest::newRow("unqualified-singular") << QStringList{"singular"} << QString("-") << QString("singular");
+        QTest::newRow("unqualified-plural") << QStringList{"plural"} << QString("-") << QString("plural");
+        QTest::newRow("unqualified-em-dash") << QStringList{"plural"} << u"—"_s << QString("plural");
+        QTest::newRow("unqualified-en-dash") << QStringList{"plural"} << u"–"_s << QString("plural");
+        QTest::newRow("empty-not-evidence") << QStringList{"plural"} << QString{} << QString{};
+        QTest::newRow("untagged-not-evidence") << QStringList{} << QString("-") << QString{};
+    }
+
+    void missing_number_markers_require_unqualified_evidence() {
+        QFETCH(QStringList, missing_tags);
+        QFETCH(QString, marker);
+        QFETCH(QString, unavailable);
+        const auto headword = unavailable == "singular" ? QString("talot") : QString("talo");
+        const QJsonArray forms{
+            QJsonObject{{"word", "talo"}, {"tags", QJsonArray{"nominative", "singular"}}},
+            QJsonObject{{"word", "talot"}, {"tags", QJsonArray{"nominative", "plural"}}},
+            QJsonObject{{"word", marker}, {"tags", QJsonArray::fromStringList(missing_tags)}}};
+        for (const auto &provider : {"freedictionary", "kaikki"}) {
+            QJsonObject document;
+            if (QString::fromLatin1(provider) == "freedictionary") {
+                const QJsonObject entry{{"language", QJsonObject{{"code", "fi"}}}, {"partOfSpeech", "noun"},
+                    {"forms", forms}, {"senses", QJsonArray{QJsonObject{{"definition", "house"}}}}};
+                const QJsonObject raw{{"word", headword}, {"entries", QJsonArray{entry}}};
+                document = showthis::free_dictionary_document(raw, headword, "fi");
+            } else {
+                QJsonArray kaikki_forms;
+                for (const auto &value : forms) {
+                    auto form = value.toObject();
+                    form.insert("form", form.take("word"));
+                    kaikki_forms.append(form);
+                }
+                QString error;
+                document = showthis::kaikki_dictionary_document(
+                    kaikki_entry(headword, "house", "fi", {}, kaikki_forms), headword, "fi", "en", error);
+                QVERIFY(error.isEmpty());
+            }
+            const auto sense = showthis::dictionary_senses(document, "fi")[0].toMap();
+            QCOMPARE(sense.value("unavailable_numbers").toStringList(),
+                unavailable.isEmpty() ? QStringList{} : QStringList{unavailable});
+            for (const auto &number : {"singular", "plural"}) {
+                const auto prefix = QString::fromLatin1(number);
+                const bool restricted = unavailable == prefix;
+                QCOMPARE(sense.value(prefix + "_status").toString(),
+                    restricted ? QString("unavailable") : QString("available"));
+                QCOMPARE(sense.value(prefix + "_forms").toStringList(),
+                    restricted ? QStringList{} : QStringList{prefix == "singular" ? "talo" : "talot"});
+            }
+        }
+    }
+
     void inflection_uses_linked_base_metadata_not_oblique_article() {
         QString error;
         auto base = showthis::kaikki_dictionary_document(kaikki_entry("Haus", "house", "de", {}, house_forms()),

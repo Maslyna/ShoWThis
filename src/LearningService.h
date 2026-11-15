@@ -76,7 +76,7 @@ public:
     Q_INVOKABLE void translate(const QString &word, const QString &context);
     Q_INVOKABLE bool save_word(const QString &id, const QString &word, const QString &context,
                              const QString &meaning, const QString &translation,
-                             const QString &notes, int sense_index,
+                             const QString &notes, const QVariantMap &selected_sense,
                               const QString &article = QStringLiteral("auto"),
                               const QVariantMap &word_forms = {});
     Q_INVOKABLE QString format_word(const QString &word, const QString &article) const;

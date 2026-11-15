@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QDir>
 #include <QJsonObject>
 #include <QNetworkRequest>
 #include <QVariantList>
@@ -27,11 +28,28 @@ struct DictionaryOptions {
     QString data_revision;
 };
 
+struct DictionaryRequestBoundary {
+    // An origin and a subtree path ending in '/'.
+    QUrl root;
+
+    bool allows(const QUrl &url) const {
+        if (!url.isValid() || url.scheme() != root.scheme() || url.host() != root.host()
+            || url.port(url.scheme() == "https" ? 443 : 80) != root.port(root.scheme() == "https" ? 443 : 80)
+            || !url.userInfo().isEmpty())
+            return false;
+        const auto path = QDir::cleanPath(url.path());
+        const auto prefix = root.path();
+        return path.startsWith(prefix) || (path.size() + 1 == prefix.size() && prefix.startsWith(path));
+    }
+};
+
 struct DictionaryRequest {
     QNetworkRequest request;
     QByteArray method = "GET";
     QByteArray body;
     QVariantMap state;
+    // Check the initial URL and every resolved redirect before sending.
+    std::optional<DictionaryRequestBoundary> boundary = {};
 };
 
 struct DictionaryResponse {

@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
     QAction *capture_action = menu.addAction("Capture screen");
     QObject::connect(capture_action, &QAction::triggered, &controller, &showthis::OverlayController::toggle_overlay);
     QAction *retry_action = menu.addAction("Retry shortcut setup");
-    QObject::connect(retry_action, &QAction::triggered, &portal, &showthis::GlobalShortcutPortal::start);
+    QObject::connect(retry_action, &QAction::triggered, &portal, &showthis::GlobalShortcutPortal::retry);
     QObject::connect(&portal, &showthis::GlobalShortcutPortal::state_changed, &app, [&]() {
         retry_action->setEnabled(!portal.ready());
         if (!portal.error().isEmpty()) {
