@@ -6,6 +6,11 @@ Item {
     id: root
     focus: true
     Keys.onEscapePressed: function(event) {
+        if (word_picker.visible) {
+            word_picker.close()
+            event.accepted = true
+            return
+        }
         if (context_selection.active) {
             context_selection.cancel()
         } else if (translator_dialog.visible && (!notebook_dialog.visible || translator_dialog.z > notebook_dialog.z)) {
@@ -44,7 +49,7 @@ Item {
         const available_height = Math.max(0, height - 24)
         const adjacent = notebook_dialog.visible && translator_dialog.visible
             && !notebook_dialog.user_geometry && !translator_dialog.user_geometry
-            && available_width >= notebook_dialog.minimumWidth + translator_dialog.minimumWidth + 12
+            && available_width >= 880 + 640 + 12
         const notebook_width = adjacent
             ? Math.min(1120, Math.max(notebook_dialog.minimumWidth,
                 Math.min(Math.floor((available_width - 12) * 0.58),
@@ -172,9 +177,11 @@ Item {
         function onWordsChanged() {
             root.clearHover()
             context_selection.cancel()
+            word_picker.close()
         }
         function onImageChanged() {
             const was_selecting = root.selecting_context
+            word_picker.close()
             context_selection.cancel()
             if (!overlay.visible && !was_selecting) {
                 notebook_dialog.visible = false
@@ -187,6 +194,7 @@ Item {
         function onVisibleChanged() {
             root.clearHover()
             languagePopup.close()
+            word_picker.close()
             if (!overlay.visible) context_selection.cancel()
             if (overlay.visible) Qt.callLater(root.focus_dialog)
         }
@@ -290,7 +298,7 @@ Item {
         x: root.bounded(moved ? freeX : (root.width - width) / 2, root.width - width - 12)
         y: root.bounded(moved ? freeY : root.height - height - 24, root.height - height - 12)
         width: Math.max(0, Math.min(760, root.width - 24))
-        height: 60
+        height: toolbar_sections.implicitHeight + 66
         color: systemPalette.window
         border.color: Qt.alpha(systemPalette.windowText, 0.2)
         radius: 10
@@ -308,12 +316,46 @@ Item {
             onHoveredChanged: if (hovered) root.clearHover()
         }
 
+        ColumnLayout {
+            id: toolbar_sections
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: 10
+            spacing: 6
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    objectName: "recognition_status"
+                    text: overlay.scanning ? qsTr("Recognizing…")
+                        : overlay.error.length > 0 ? overlay.error
+                        : overlay.words.length === 0 ? qsTr("No words found. Choose the matching OCR language and capture again.")
+                        : qsTr("%1 words · Click a word or choose from the list").arg(overlay.words.length)
+                    color: systemPalette.windowText
+                    textFormat: Text.PlainText
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    Accessible.name: text
+                }
+                NotebookButton {
+                    objectName: "choose_recognized_word"
+                    text: qsTr("Choose word…")
+                    enabled: !overlay.scanning && overlay.words.length > 0
+                    onClicked: word_picker.open()
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Choose a recognized word · Ctrl+L")
+                }
+            }
+        }
         RowLayout {
             id: toolbarContent
-            anchors.fill: parent
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
             anchors.margins: 10
+            height: 40
             spacing: root.width < 640 ? 4 : 8
-
             Item {
                 objectName: "toolbarDragHandle"
                 Layout.preferredWidth: root.width < 640 ? 18 : 26
@@ -388,19 +430,7 @@ Item {
                 Layout.preferredHeight: 24
             }
 
-            Label {
-                visible: root.width >= 640
-                text: overlay.scanning ? qsTr("Recognizing…")
-                    : overlay.error.length > 0 ? qsTr("OCR failed: %1").arg(overlay.error)
-                    : overlay.words.length === 0 ? qsTr("No words found")
-                    : qsTr("%1 words · Click to learn").arg(overlay.words.length)
-                color: systemPalette.windowText
-                opacity: 0.8
-                textFormat: Text.PlainText
-                Layout.fillWidth: true
-                Layout.minimumWidth: 0
-                elide: Text.ElideRight
-            }
+            Item { Layout.fillWidth: true }
 
             CheckBox {
                 id: highlightsButton
@@ -436,6 +466,23 @@ Item {
                 onClicked: overlay.hide_requested()
             }
         }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+L"
+        enabled: !root.dialogs_visible && !context_selection.active && !word_picker.visible
+            && !overlay.scanning && overlay.words.length > 0 && overlay.visible
+        onActivated: word_picker.open()
+    }
+    RecognizedWordPicker {
+        id: word_picker
+        objectName: "capture_word_picker"
+        words: overlay.words
+        onWord_activated: function(index) {
+            const word = overlay.words[index]
+            if (word) overlay.open_notebook_word(word.text, word.context || "")
+        }
+        onClosed: root.focus_dialog()
     }
 
     Popup {

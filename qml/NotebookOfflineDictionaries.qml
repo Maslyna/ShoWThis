@@ -10,6 +10,29 @@ NotebookSurface {
     objectName: "offline_dictionary_settings"
     Layout.fillWidth: true
 
+    function lookup_language(pack): string {
+        return manager.normalize_word_language(pack.word_language || service.source_language)
+    }
+    function is_selected(pack): bool {
+        const selected = service.dictionary_selection.find(function(item) { return item.provider === "kaikki" })
+        return service.source_language === lookup_language(pack) && manager.mode !== "online_only"
+            && !!selected && !selected.fallback && selected.languages.indexOf(pack.edition) >= 0
+    }
+    function activate(pack) {
+        const language = lookup_language(pack)
+        if (manager.busy || !language || !manager.packs.some(function(item) {
+            return item.edition === pack.edition && item.word_language === pack.word_language
+        })) return
+        const selection = service.dictionary_selection.filter(function(item) { return item.provider !== "kaikki" })
+            .map(function(item) {
+                return {provider: item.provider, languages: Array.from(item.languages), fallback: item.fallback}
+            })
+        selection.push({provider: "kaikki", languages: [pack.edition], fallback: false})
+        if (!service.configure_dictionaries(selection, service.follow_forms)) return
+        service.source_language = language
+        if (manager.mode === "online_only") manager.mode = "prefer_local"
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 10
@@ -23,6 +46,7 @@ NotebookSurface {
         Label { text: qsTr("Word language"); font.pixelSize: 12; font.bold: true }
         NotebookLanguagePicker {
             objectName: "offline_dictionary_word_language"
+            Accessible.name: qsTr("Offline dictionary word language")
             options: [{code: "", name: qsTr("All word languages")}].concat(Array.from(settings.service.language_options))
             language_code: settings.word_language
             enabled: !settings.manager.busy
@@ -93,6 +117,7 @@ NotebookSurface {
         Label { text: qsTr("Use downloaded definitions"); font.pixelSize: 12; font.bold: true }
         SearchableComboBox {
             objectName: "offline_dictionary_mode"
+            Accessible.name: qsTr("Downloaded dictionary lookup policy")
             model: [
                 {code: "fallback", name: qsTr("When online lookup cannot connect")},
                 {code: "prefer_local", name: qsTr("Prefer downloaded data")},
@@ -107,7 +132,7 @@ NotebookSurface {
             onActivated: settings.manager.mode = currentValue
         }
         Label {
-            text: qsTr("For lookup, select the matching word language and Kaikki definition language in Sources & languages. Other sources may still go online.")
+            text: qsTr("Use an installed dictionary for lookup below. This sets its word and definition languages; other sources stay selected. Online-only mode switches to prefer downloaded data. All-language packs use the current lookup word language.")
             font.pixelSize: 11
             opacity: 0.65
             wrapMode: Text.WordWrap
@@ -121,7 +146,7 @@ NotebookSurface {
         }
         Repeater {
             model: settings.manager.packs
-            RowLayout {
+            ColumnLayout {
                 required property var modelData
                 Layout.fillWidth: true
                 Label {
@@ -131,16 +156,34 @@ NotebookSurface {
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
-                NotebookButton {
-                    objectName: "remove_offline_dictionary_" + (parent.modelData.word_language || "all") + "_" + parent.modelData.edition
-                    text: qsTr("Remove…")
-                    quiet: true
-                    enabled: !settings.manager.busy
-                    onClicked: {
-                        remove_confirmation.edition = parent.modelData.edition
-                        remove_confirmation.word_language = parent.modelData.word_language
-                        remove_confirmation.open()
+                RowLayout {
+                    Layout.fillWidth: true
+                    NotebookButton {
+                        objectName: "activate_offline_dictionary_" + (parent.parent.modelData.word_language || "all") + "_" + parent.parent.modelData.edition
+                        text: checked ? qsTr("Selected for lookup") : qsTr("Use for lookup")
+                        checked: settings.is_selected(parent.parent.modelData)
+                        enabled: !settings.manager.busy && !!settings.lookup_language(parent.parent.modelData)
+                        Accessible.name: qsTr("%1: %2 to %3 definitions").arg(text)
+                            .arg(settings.lookup_language(parent.parent.modelData).toUpperCase()).arg(parent.parent.modelData.name)
+                        onClicked: settings.activate(parent.parent.modelData)
                     }
+                    NotebookButton {
+                        objectName: "remove_offline_dictionary_" + (parent.parent.modelData.word_language || "all") + "_" + parent.parent.modelData.edition
+                        text: qsTr("Remove…")
+                        quiet: true
+                        enabled: !settings.manager.busy
+                        onClicked: {
+                            remove_confirmation.edition = parent.parent.modelData.edition
+                            remove_confirmation.word_language = parent.parent.modelData.word_language
+                            remove_confirmation.open()
+                        }
+                    }
+                }
+                Label {
+                    visible: !settings.lookup_language(parent.modelData)
+                    text: qsTr("Choose a valid lookup word language before using this all-language pack.")
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
                 }
             }
         }

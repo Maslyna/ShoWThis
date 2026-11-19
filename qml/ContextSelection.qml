@@ -12,6 +12,7 @@ Item {
     required property real scale_y
     property bool active: false
     visible: active
+    onActiveChanged: if (!active) word_picker.close()
 
     signal accepted(string text)
     signal cancelled()
@@ -58,6 +59,7 @@ Item {
     function cancel() {
         if (!active) return
         active = false
+        word_picker.close()
         gesture_pressed = false
         dragging = false
         cancelled()
@@ -131,6 +133,17 @@ Item {
         if (indices.length > 0) add_indices(indices)
     }
 
+    function toggle_index(index) {
+        if (!selectable_word(index)) return
+        if (selected_indices[index]) {
+            const selected = Object.assign({}, selected_indices)
+            delete selected[index]
+            selected_indices = selected
+        } else {
+            add_indices([index])
+        }
+    }
+
     function toggle_word(x, y) {
         for (let index = 0; index < words.length; ++index) {
             if (!selectable_word(index)) continue
@@ -139,13 +152,7 @@ Item {
             const top = word.y * scale_y
             if (x < left || x > left + word.width * scale_x
                     || y < top || y > top + word.height * scale_y) continue
-            if (selected_indices[index]) {
-                const selected = Object.assign({}, selected_indices)
-                delete selected[index]
-                selected_indices = selected
-            } else {
-                add_indices([index])
-            }
+            toggle_index(index)
             return
         }
     }
@@ -170,9 +177,23 @@ Item {
     }
     Shortcut {
         sequence: "Escape"
-        enabled: root.active
+        enabled: root.active && !word_picker.visible
         context: Qt.WindowShortcut
         onActivated: root.cancel()
+    }
+    Shortcut {
+        sequence: "Ctrl+L"
+        enabled: root.active && !word_picker.visible
+        onActivated: word_picker.open()
+    }
+    RecognizedWordPicker {
+        id: word_picker
+        objectName: "context_word_picker"
+        words: root.words
+        multiple: true
+        selected_indices: root.selected_indices
+        onWord_toggled: function(index) { root.toggle_index(index) }
+        onClosed: if (root.active) root.forceActiveFocus()
     }
 
     Repeater {
@@ -317,11 +338,19 @@ Item {
 
             Label {
                 Layout.fillWidth: true
-                text: qsTr("Drag rectangles to add words. Click a word to toggle it.")
+                text: qsTr("Drag rectangles to add words, click to toggle, or choose words from the list.")
                 textFormat: Text.PlainText
                 wrapMode: Text.WordWrap
                 color: system_palette.windowText
                 font.pixelSize: 12
+            }
+            NotebookButton {
+                objectName: "choose_context_words"
+                text: qsTr("Choose words…")
+                Layout.fillWidth: true
+                onClicked: word_picker.open()
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Choose context words · Ctrl+L")
             }
 
             ScrollView {
@@ -343,6 +372,7 @@ Item {
                     selectByMouse: true
                     textFormat: TextEdit.PlainText
                     wrapMode: TextEdit.Wrap
+                    Accessible.name: qsTr("Selected context")
                     color: system_palette.text
                     selectionColor: system_palette.highlight
                     selectedTextColor: system_palette.highlightedText

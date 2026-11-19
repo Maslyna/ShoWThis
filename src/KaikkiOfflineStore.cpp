@@ -118,7 +118,7 @@ KaikkiOfflineStore::KaikkiOfflineStore(QNetworkAccessManager *network, const QSt
         const auto result = m_watcher->result();
         if (!result.cancelled && result.error.isEmpty()) {
             refresh_packs();
-            finish(tr("Kaikki dictionary installed. Select its word language and Kaikki definition language for lookup."));
+            finish(tr("Kaikki dictionary installed. Choose Use for lookup beside the installed dictionary."));
             emit data_changed();
         } else {
             finish(result.cancelled ? tr("Download cancelled. Previously installed data was kept.") : result.error);

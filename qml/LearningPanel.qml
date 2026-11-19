@@ -18,6 +18,8 @@ Pane {
     property alias word_prefix: word_editor.word_prefix
     readonly property string selected_word: word_editor.current_word
     readonly property bool wide_layout: width >= 880
+    readonly property bool short_layout: height < 480
+    readonly property string status_text: service.message || qsTr("Your cards stay local. Translation runs only when you ask.")
     readonly property var page_names: [qsTr("Word & context"), qsTr("Saved words"), qsTr("Recent lookups"), qsTr("Settings")]
     padding: 0
     visible: false
@@ -147,8 +149,8 @@ Pane {
         ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.margins: panel.wide_layout ? 22 : 14
-            spacing: 12
+            Layout.margins: panel.wide_layout ? 20 : panel.short_layout ? 8 : 12
+            spacing: panel.short_layout ? 8 : 12
             RowLayout {
                 Layout.fillWidth: true
                 ColumnLayout {
@@ -223,9 +225,12 @@ Pane {
                 currentIndex: navigation.current_index
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.minimumHeight: 0
                 NotebookWordEditor {
                     id: word_editor
+                    Layout.minimumHeight: 0
                     service: panel.service
+                    status_text: panel.status_text
                     wide_layout: panel.wide_layout
                     context_selection_available: panel.context_selection_available
                     onContext_selection_requested: panel.context_selection_requested()
@@ -256,7 +261,8 @@ Pane {
                 NotebookSettings { service: panel.service }
             }
             Label {
-                text: panel.service.message || qsTr("Your cards stay local. Translation runs only when you ask.")
+                visible: navigation.current_index !== 0
+                text: panel.status_text
                 textFormat: Text.PlainText
                 font.pixelSize: panel.service.message.length > 0 ? 12 : 10
                 opacity: panel.service.message.length > 0 ? 0.8 : 0.55

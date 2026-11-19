@@ -8,6 +8,7 @@
 #include <QQuickWindow>
 #include <QSettings>
 #include <QSignalSpy>
+#include <QScopeGuard>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -31,6 +32,19 @@ QQuickItem *settings_item(QQuickItem *dialog, const QString &name) {
     auto *popup = dialog->findChild<QObject *>("translator_settings_popup");
     auto *content = popup ? popup->property("contentItem").value<QQuickItem *>() : nullptr;
     return content ? find_item(content, name) : nullptr;
+}
+
+bool fully_visible(QQuickItem *dialog, QQuickItem *item) {
+    if (!item || !item->isVisible() || item->width() <= 0 || item->height() <= 0)
+        return false;
+    const QRectF bounds(QPointF(), item->size());
+    if (!QRectF(QPointF(), dialog->size()).contains(item->mapRectToItem(dialog, bounds)))
+        return false;
+    for (auto *parent = item->parentItem(); parent && parent != dialog; parent = parent->parentItem()) {
+        if (parent->clip() && !QRectF(QPointF(), parent->size()).contains(item->mapRectToItem(parent, bounds)))
+            return false;
+    }
+    return true;
 }
 
 void click_item(QQuickItem *dialog, QQuickItem *item) {
@@ -259,6 +273,89 @@ private slots:
         QTRY_VERIFY(!window->isVisible());
         QVERIFY(notebook->isVisible());
         QVERIFY(network.requests.isEmpty());
+    }
+
+    void compact_actions_remain_visible_while_content_scrolls_data() {
+        QTest::addColumn<bool>("enlarged_font");
+        QTest::newRow("default") << false;
+        QTest::newRow("large-font-long-card") << true;
+    }
+
+    void compact_actions_remain_visible_while_content_scrolls() {
+        QFETCH(bool, enlarged_font);
+        const auto original_font = QApplication::font();
+        const auto restore_font = qScopeGuard([&]() { QApplication::setFont(original_font); });
+        if (enlarged_font) {
+            auto font = original_font;
+            font.setPointSizeF(qMax(10.0, font.pointSizeF()) * 1.5);
+            QApplication::setFont(font);
+        }
+        QTemporaryDir directory;
+        TestNetwork network;
+        network.automatic = false;
+        network.response = R"({"translatedText":"bonjour"})";
+        showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
+        configure(service);
+        showthis::ShoWSurface surface(nullptr, &service);
+        surface.resize(1400, 900);
+        surface.open_notebook_word(enlarged_font ? "Verantwortungsbewusstsein bei der Wortauswahl" : "Haus", "");
+        surface.open_translator("hello", "en", "translation");
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        auto *dialog = surface.translator_dialog();
+        QVERIFY(dialog);
+        dialog->setPosition(QPointF());
+        dialog->setSize(QSizeF(360, 400));
+        auto *scroll = find_item(dialog, "translator_content_scroll");
+        auto *translate = find_item(dialog, "translator_translate");
+        auto *cancel = find_item(dialog, "translator_cancel");
+        auto *add_source = find_item(dialog, "translator_add_source");
+        auto *add_result = find_item(dialog, "translator_add_result");
+        auto *result = find_item(dialog, "translator_result_text");
+        auto *field = find_item(dialog, "translator_card_field");
+        auto *context = find_item(surface.notebook_dialog(), "word_context");
+        auto *translation = find_item(surface.notebook_dialog(), "word_translation");
+        QVERIFY(scroll && translate && cancel && add_source && add_result && result && field && context && translation);
+        auto *provider = find_item(dialog, "translator_provider");
+        auto *setup = find_item(dialog, "translator_setup");
+        QVERIFY(provider && setup);
+        dialog->forceActiveFocus();
+        provider->forceActiveFocus();
+        QTest::keyClick(&surface, Qt::Key_Tab);
+        QTRY_VERIFY(setup->hasActiveFocus());
+        auto *content = scroll->property("contentItem").value<QQuickItem *>();
+        QVERIFY(content);
+        QTRY_VERIFY(content->height() > 40);
+        QVERIFY(content->property("contentHeight").toReal() > content->height());
+        QTRY_VERIFY(fully_visible(dialog, translate));
+        QVERIFY(fully_visible(dialog, add_source));
+        QVERIFY(fully_visible(dialog, add_result));
+        QVERIFY(fully_visible(dialog, field));
+        QVERIFY(translate->isEnabled());
+        QVERIFY(add_source->isEnabled());
+        QVERIFY(network.requests.isEmpty());
+        // Request actions must work without click_item's scroll-to-control assistance.
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier,
+            translate->mapToScene(QPointF(translate->width() / 2, translate->height() / 2)).toPoint());
+        QTRY_COMPARE(network.requests.size(), 1);
+        QTRY_VERIFY(fully_visible(dialog, cancel));
+        network.last_reply->complete();
+        QTRY_COMPARE(result->property("text").toString(), QString("bonjour"));
+        content->setProperty("contentY", content->property("contentHeight").toReal() - content->height());
+        QTRY_VERIFY(fully_visible(dialog, translate));
+        QVERIFY(fully_visible(dialog, add_source));
+        QVERIFY(fully_visible(dialog, add_result));
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier,
+            add_result->mapToScene(QPointF(add_result->width() / 2, add_result->height() / 2)).toPoint());
+        QCOMPARE(translation->property("text").toString(), QString("bonjour"));
+        QTRY_VERIFY(fully_visible(dialog, add_source));
+        QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier,
+            add_source->mapToScene(QPointF(add_source->width() / 2, add_source->height() / 2)).toPoint());
+        QCOMPARE(context->property("text").toString(), QString("hello"));
+        QVERIFY(service.vocabulary().isEmpty());
+        QCOMPARE(network.requests.size(), 1);
+        if (qEnvironmentVariableIsSet("SHOWTHIS_TEST_SCREENSHOTS"))
+            QVERIFY(surface.grabWindow().save(qEnvironmentVariable("SHOWTHIS_TEST_SCREENSHOTS")
+                + "/translator-actions-minimum-" + QTest::currentDataTag() + ".png"));
     }
 
     void dialogs_move_resize_focus_and_remain_bounded() {

@@ -100,7 +100,11 @@ OverlayDialog {
 
     ScrollView {
         id: page
-        anchors.fill: parent
+        objectName: "translator_content_scroll"
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: action_footer.top
         clip: true
         contentWidth: availableWidth
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
@@ -108,12 +112,12 @@ OverlayDialog {
             width: page.availableWidth
             height: Math.max(implicitHeight, page.availableHeight)
             spacing: 16
-            // A single content column scrolls at small sizes; text panels scroll independently.
+            // Configuration and text scroll; request and card actions stay in view.
             Pane {
                 id: translation_page
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                padding: window.wide_layout ? 20 : 16
+                padding: window.wide_layout ? 20 : 12
                 palette.window: colors.window
                 palette.windowText: colors.windowText
                 palette.base: colors.base
@@ -133,13 +137,14 @@ OverlayDialog {
                 background: Item {}
                 ColumnLayout {
                     anchors.fill: parent
-                    spacing: 12
+                    spacing: window.wide_layout ? 12 : 8
                     GridLayout {
                         Layout.fillWidth: true
                         columns: window.wide_layout ? 3 : 2
                         columnSpacing: 12
-                        rowSpacing: 12
+                        rowSpacing: 8
                         Label {
+                            visible: window.wide_layout
                             text: qsTr("Translator")
                             font.pixelSize: 25
                             font.weight: Font.DemiBold
@@ -156,9 +161,9 @@ OverlayDialog {
                                 return provider.id === window.translator.provider_id
                             })
                             onActivated: window.translator.provider_id = currentValue
-                            Layout.row: window.wide_layout ? 0 : 1
+                            Layout.row: 0
                             Layout.column: window.wide_layout ? 1 : 0
-                            Layout.columnSpan: window.wide_layout ? 1 : 2
+                            Layout.columnSpan: 1
                             Layout.preferredWidth: window.wide_layout ? 220 : -1
                             Layout.fillWidth: !window.wide_layout
                             Layout.minimumWidth: 0
@@ -206,6 +211,14 @@ OverlayDialog {
                             Layout.minimumWidth: 0
                             Accessible.name: qsTr("Target language")
                         }
+                    }
+                    Label {
+                        objectName: "translator_error"
+                        visible: text.length > 0
+                        text: window.translator.session_error
+                        textFormat: Text.PlainText
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
                     }
                     GridLayout {
                         Layout.fillWidth: true
@@ -297,92 +310,104 @@ OverlayDialog {
                             }
                         }
                     }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Label {
-                            text: !window.translator.provider_id.length ? qsTr("Choose a provider to enable translation.")
-                                : !window.translator.configured ? qsTr("Open Setup to complete provider settings.")
-                                : window.translator.session_busy ? qsTr("Translating…") : qsTr("Text is sent only when you press Translate.")
-                            font.pixelSize: 11
-                            opacity: 0.65
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-                        NotebookButton {
-                            objectName: "translator_cancel"
-                            text: qsTr("Cancel")
-                            visible: window.translator.session_busy
-                            onClicked: window.translator.clear_session()
-                        }
-                        NotebookButton {
-                            id: translate_button
-                            objectName: "translator_translate"
-                            text: qsTr("Translate")
-                            primary: true
-                            enabled: !window.translator.session_busy && window.translator.configured
-                                && source.text.trim().length > 0
-                                && overlay.translator_source_language.length > 0
-                                && overlay.translator_target_language.length > 0
-                            onClicked: window.translate()
-                        }
-                    }
-                    Label {
-                        objectName: "translator_error"
-                        visible: text.length > 0
-                        text: window.translator.session_error
-                        textFormat: Text.PlainText
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                    Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Qt.alpha(colors.windowText, 0.12) }
-                    Label {
-                        objectName: "translator_selected_card"
-                        text: overlay.has_selected_card ? qsTr("Add to card: %1").arg(overlay.selected_card_word)
-                            : qsTr("Select a notebook card to add text")
-                        textFormat: Text.PlainText
-                        font.weight: Font.DemiBold
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                    GridLayout {
-                        columns: window.wide_layout ? 3 : 2
-                        Layout.fillWidth: true
-                        SearchableComboBox {
-                            id: card_field
-                            objectName: "translator_card_field"
-                            model: window.card_fields
-                            textRole: "name"
-                            valueRole: "value"
-                            currentIndex: 3
-                            Layout.fillWidth: true
-                            Layout.minimumWidth: 0
-                            Accessible.name: qsTr("Card destination field")
-                        }
-                        NotebookButton {
-                            objectName: "translator_add_result"
-                            text: qsTr("Add result")
-                            enabled: overlay.has_selected_card && result.text.trim().length > 0
-                            onClicked: window.append(card_field.currentValue, result.text)
-                        }
-                        NotebookButton {
-                            objectName: "translator_add_source"
-                            text: qsTr("Add source to context")
-                            Layout.columnSpan: window.wide_layout ? 1 : 2
-                            Layout.fillWidth: !window.wide_layout
-                            enabled: overlay.has_selected_card && source.text.trim().length > 0
-                            onClicked: window.append("context", source.text)
-                        }
-                    }
-                    Label {
-                        objectName: "translator_feedback"
-                        text: window.feedback
-                        visible: text.length > 0
-                        textFormat: Text.PlainText
-                        font.pixelSize: 12
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
                 }
+            }
+        }
+    }
+    Pane {
+        id: action_footer
+        objectName: "translator_actions"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        padding: window.wide_layout ? 20 : 12
+        palette: translation_page.palette
+        background: Rectangle { color: colors.window }
+        ColumnLayout {
+            width: parent.width
+            spacing: window.wide_layout ? 12 : 8
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: !window.translator.provider_id.length ? qsTr("Choose a provider to enable translation.")
+                        : !window.translator.configured ? qsTr("Open Setup to complete provider settings.")
+                        : window.translator.session_busy ? qsTr("Translating…") : qsTr("Text is sent only when you press Translate.")
+                    font.pixelSize: 11
+                    opacity: 0.65
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                NotebookButton {
+                    objectName: "translator_cancel"
+                    text: qsTr("Cancel")
+                    visible: window.translator.session_busy
+                    onClicked: window.translator.clear_session()
+                }
+                NotebookButton {
+                    id: translate_button
+                    objectName: "translator_translate"
+                    text: qsTr("Translate")
+                    primary: true
+                    enabled: !window.translator.session_busy && window.translator.configured
+                        && source.text.trim().length > 0
+                        && overlay.translator_source_language.length > 0
+                        && overlay.translator_target_language.length > 0
+                    onClicked: window.translate()
+                }
+            }
+            Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Qt.alpha(colors.windowText, 0.12) }
+            Label {
+                objectName: "translator_selected_card"
+                text: overlay.has_selected_card ? qsTr("Add to card: %1").arg(overlay.selected_card_word)
+                    : qsTr("Select a notebook card to add text")
+                textFormat: Text.PlainText
+                font.weight: Font.DemiBold
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                ToolTip.visible: card_hover.hovered
+                ToolTip.text: text
+                HoverHandler { id: card_hover }
+            }
+            GridLayout {
+                columns: window.wide_layout ? 3 : 2
+                Layout.fillWidth: true
+                SearchableComboBox {
+                    id: card_field
+                    objectName: "translator_card_field"
+                    model: window.card_fields
+                    textRole: "name"
+                    valueRole: "value"
+                    currentIndex: 3
+                    Layout.fillWidth: true
+                    Layout.columnSpan: window.wide_layout ? 1 : 2
+                    Layout.minimumWidth: 0
+                    Accessible.name: qsTr("Card destination field")
+                }
+                NotebookButton {
+                    objectName: "translator_add_result"
+                    text: qsTr("Add result")
+                    enabled: overlay.has_selected_card && result.text.trim().length > 0
+                    Layout.fillWidth: !window.wide_layout
+                    onClicked: window.append(card_field.currentValue, result.text)
+                }
+                NotebookButton {
+                    objectName: "translator_add_source"
+                    text: qsTr("Add source to context")
+                    Layout.columnSpan: 1
+                    Layout.fillWidth: !window.wide_layout
+                    enabled: overlay.has_selected_card && source.text.trim().length > 0
+                    onClicked: window.append("context", source.text)
+                }
+            }
+            Label {
+                objectName: "translator_feedback"
+                text: window.feedback
+                visible: text.length > 0
+                textFormat: Text.PlainText
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
             }
         }
     }

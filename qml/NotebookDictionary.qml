@@ -20,10 +20,6 @@ NotebookSurface {
     ColumnLayout {
         anchors.fill: parent
         spacing: 10
-        RowLayout {
-            Layout.fillWidth: true
-            Label { text: qsTr("Dictionary"); font.pixelSize: 17; font.bold: true; Layout.fillWidth: true }
-        }
         NotebookDictionaryOptions {
             service: dictionary.service
             onChanged: dictionary.sources_changed()
@@ -31,6 +27,7 @@ NotebookSurface {
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.minimumHeight: 128
             NotebookEmpty {
                 anchors.fill: parent
                 visible: !dictionary.service.dictionary_busy && senses.count === 0

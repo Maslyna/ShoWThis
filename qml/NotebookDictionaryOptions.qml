@@ -20,6 +20,35 @@ ColumnLayout {
                 + (selection.fallback ? qsTr(" (fallback)") : "")
         }).join("   ·   ") || qsTr("No dictionaries selected")
     }
+    function lookup_summary(): string {
+        const manager = service.offline_dictionaries
+        if (!manager) return ""
+        const language = manager.normalize_word_language(service.source_language)
+        const packs = manager.packs.filter(function(pack) {
+            return !!language && (!pack.word_language || pack.word_language === language)
+        })
+        const kaikki = service.dictionary_selection.find(function(item) { return item.provider === "kaikki" })
+        let local = ""
+        if (!kaikki) {
+            local = packs.length ? qsTr("Downloaded data available for %1; select Kaikki to use it.").arg(language.toUpperCase())
+                : qsTr("No downloaded dictionary for %1.").arg(service.source_language.toUpperCase())
+        } else {
+            const matched = kaikki.languages.filter(function(code) {
+                return packs.some(function(pack) { return pack.edition === code })
+            }).length
+            local = qsTr("Downloads: %1 of %2 selected definition languages available for %3.")
+                .arg(matched).arg(kaikki.languages.length).arg(service.source_language.toUpperCase())
+        }
+        const policies = {
+            fallback: qsTr("Kaikki: online first; local on connection failure."),
+            prefer_local: qsTr("Kaikki: local first; may go online."),
+            local_only: qsTr("Kaikki: downloaded data only; no Kaikki requests."),
+            online_only: qsTr("Kaikki: online only; downloads are not used.")
+        }
+        const other_online = service.dictionary_selection.some(function(item) { return item.provider !== "kaikki" })
+        return local + (kaikki ? " " + policies[manager.mode] : "")
+            + (other_online ? " " + (kaikki ? qsTr("Other sources may go online.") : qsTr("Selected sources may go online.")) : "")
+    }
     function update(index, field, value) {
         const next = JSON.parse(JSON.stringify(draft))
         next[index][field] = value
@@ -35,18 +64,29 @@ ColumnLayout {
 
     RowLayout {
         Layout.fillWidth: true
-        Label {
-            objectName: "dictionary_source_summary"
-            text: options.summary()
-            textFormat: Text.PlainText
-            font.pixelSize: 11
-            opacity: 0.7
-            elide: Text.ElideRight
+        ColumnLayout {
             Layout.fillWidth: true
             Layout.minimumWidth: 0
-            ToolTip.visible: summary_hover.hovered
-            ToolTip.text: text
-            HoverHandler { id: summary_hover }
+            spacing: 4
+            Label {
+                text: qsTr("Dictionary")
+                font.pixelSize: 17
+                font.bold: true
+                Layout.fillWidth: true
+            }
+            Label {
+                objectName: "dictionary_source_summary"
+                text: options.summary()
+                textFormat: Text.PlainText
+                font.pixelSize: 11
+                opacity: 0.7
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                ToolTip.visible: summary_hover.hovered
+                ToolTip.text: text
+                HoverHandler { id: summary_hover }
+            }
         }
         NotebookButton {
             objectName: "choose_dictionary_sources"
@@ -55,6 +95,16 @@ ColumnLayout {
             font.pixelSize: 12
             onClicked: picker.open()
         }
+    }
+    Label {
+        objectName: "dictionary_lookup_policy_summary"
+        text: options.lookup_summary()
+        visible: text.length > 0
+        textFormat: Text.PlainText
+        font.pixelSize: 11
+        wrapMode: Text.WordWrap
+        Layout.fillWidth: true
+        Layout.minimumWidth: 0
     }
 
     Dialog {

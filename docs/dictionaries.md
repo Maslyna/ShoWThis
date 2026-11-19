@@ -148,7 +148,11 @@ In **Settings → Offline dictionaries**:
    size**. For example, **German → Русский definitions** means German words
    explained in Russian; **English → Русский definitions** is a separate pack.
 2. Select **Download / update…** and confirm the transfer and disk-space warning.
-3. Enable Kaikki and the matching definition language in **Sources & languages…**.
+3. Choose **Use for lookup** beside the installed pack. This selects its word
+   language and Kaikki definition language while retaining other selected
+   providers. All-language packs use the current lookup word language.
+   **Online only** changes to **Prefer downloaded data**; other policies stay as
+   configured. Downloading alone never changes lookup settings.
 4. Choose how Kaikki uses its downloaded data:
    - **When online lookup cannot connect**: try the online service first, then
       downloaded data after a connection failure, timeout, rate limit, or server
@@ -165,6 +169,9 @@ This is about internet access, whether wired or Wi-Fi—not specifically the
 presence of an Ethernet adapter. Other selected providers can still send online
 requests. For entirely local dictionary lookup, select only Kaikki and choose
 **Downloaded data only**. Translation remains a separate online operation.
+
+The dictionary pane shows matching downloaded data and the effective Kaikki
+policy, including a warning when other selected sources may go online.
 
 Each transfer is the full compressed raw Wiktextract edition, but the local
 index keeps only the chosen word language. **All word languages** can be selected

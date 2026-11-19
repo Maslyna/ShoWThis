@@ -1,4 +1,6 @@
 #include <QGuiApplication>
+#include <QAccessible>
+#include <QScopeGuard>
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQuickItem>
@@ -77,6 +79,7 @@ const QByteArray languages = R"(
     NotebookLanguagePicker {
         objectName: "picker"
         x: 20; y: 20; width: 300
+        Accessible.name: "Dictionary language"
         options: [
             {code: "en", name: "English"},
             {code: "fr", name: "French"},
@@ -101,6 +104,14 @@ private slots:
         auto *control = picker(view);
         QVERIFY(control);
         QVERIFY(editor(control));
+        const bool accessibility_was_active = QAccessible::isActive();
+        const auto restore_accessibility = qScopeGuard([&]() { QAccessible::setActive(accessibility_was_active); });
+        QAccessible::setActive(true);
+        control->forceActiveFocus();
+        QTRY_COMPARE(view.activeFocusItem(), editor(control));
+        auto *accessible_editor = QAccessible::queryAccessibleInterface(view.activeFocusItem());
+        QVERIFY(accessible_editor);
+        QCOMPARE(accessible_editor->text(QAccessible::Name), QStringLiteral("Dictionary language"));
         QSignalSpy activated(control, SIGNAL(activated(int)));
         QSignalSpy selected(control, SIGNAL(language_selected(QString)));
         QSignalSpy accepted(control, SIGNAL(accepted()));

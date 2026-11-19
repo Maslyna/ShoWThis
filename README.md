@@ -36,6 +36,9 @@ Retry opens shortcut configuration on version-2 portals; older portals provide
 directions to KDE's shortcut settings. Setup is ready only when the overlay action
 has an assigned trigger. Launching a second instance opens the running notebook.
 
+On the capture overlay, **Choose word…** / **Ctrl+L** opens recognized words in
+reading order. Use **Up/Down**, then **Enter** to open a word; **Esc** cancels.
+
 ## Word workspace
 
 Context is editable directly under the word. The **Translate** buttons beside the
@@ -48,6 +51,13 @@ Desktop dictionary/card panes have a draggable divider. Compact layouts use
 **Dictionary / My word card** tabs. Dictionary language controls affect lookup,
 not the independent translator. Translation language selectors live only in the
 translator dialog.
+
+Short windows scroll the word workspace while **Save word** and status stay
+together. Compact Translator groups provider/setup and card actions to leave more
+room for editable text.
+Changing lookup text or sources keeps your personal fields. Choosing another
+dictionary meaning asks before replacing meaning, word translation, article, and
+word forms; notes and context stay intact. Nothing is saved until you choose Save.
 
 ## Selecting context
 
@@ -62,6 +72,11 @@ selections with newlines in selection order. Click **Use context** to apply it,
 or **Cancel** / **Esc** to keep the original draft. **Clear** starts over; drag
 the preview panel's header to reach text underneath it. The applied text remains
 editable in the notebook.
+
+For keyboard selection, use **Choose words…** / **Ctrl+L**, **Up/Down** to
+navigate, and **Space** to include or exclude words. Choose **Done** or **Esc** to
+return to the preview, then **Use context** to apply it. Closing just the word
+list does not cancel the pending context selection.
 
 Selection uses the current screenshot's recognized words, without recapturing,
 rerunning OCR, or contacting a service. Capture a screen first if the button is

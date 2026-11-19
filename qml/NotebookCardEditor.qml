@@ -25,6 +25,8 @@ NotebookSurface {
     property alias context_translation: context_translation_input.text
     property bool context_translation_expanded: false
     property alias notes: notes_input.text
+    readonly property bool has_sense_content: !!(meaning.trim() || translation.trim() || word_prefix.trim()
+        || base_form.trim() || base_prefix.trim() || plural_form.trim() || singular_form.trim() || number_relevant)
     signal edited()
     objectName: "personal_card_pane"
 
@@ -77,11 +79,12 @@ NotebookSurface {
             objectName: "word_card_scroll"
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.minimumHeight: 0
             clip: true
             contentWidth: availableWidth
             ColumnLayout {
-                width: parent.width
-                spacing: 10
+                width: scroll.availableWidth
+                spacing: 12
                 RowLayout {
                     Layout.fillWidth: true
                     Label { text: qsTr("Article / prefix"); font.bold: true; font.pixelSize: 12 }
@@ -124,35 +127,52 @@ NotebookSurface {
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
-                Label { text: qsTr("Meaning"); font.bold: true; font.pixelSize: 12 }
-                TextArea {
-                    id: meaning_input
-                    objectName: "word_meaning"
+                ColumnLayout {
                     Layout.fillWidth: true
-                    wrapMode: TextEdit.Wrap
-                    textFormat: TextEdit.PlainText
-                    selectByMouse: true
-                    placeholderText: form.wide_layout ? qsTr("Choose a meaning on the left, or write your own.") : qsTr("Your chosen meaning, in your own words…")
-                    Accessible.name: qsTr("Chosen meaning")
-                    onTextChanged: form.edited()
+                    Layout.minimumWidth: 0
+                    spacing: 4
+                    Label {
+                        text: qsTr("Meaning")
+                        font.bold: true
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    TextArea {
+                        id: meaning_input
+                        objectName: "word_meaning"
+                        Layout.fillWidth: true
+                        wrapMode: TextEdit.Wrap
+                        textFormat: TextEdit.PlainText
+                        selectByMouse: true
+                        placeholderText: form.wide_layout ? qsTr("Choose a meaning on the left, or write your own.") : qsTr("Your chosen meaning, in your own words…")
+                        Accessible.name: qsTr("Chosen meaning")
+                        onTextChanged: form.edited()
+                    }
                 }
-                Label {
-                    text: qsTr("Word translation (optional)")
-                    font.bold: true
-                    font.pixelSize: 12
+                ColumnLayout {
                     Layout.fillWidth: true
-                }
-                TextArea {
-                    id: translation_input
-                    objectName: "word_translation"
-                    Layout.fillWidth: true
-                    font.pixelSize: 19
-                    wrapMode: TextEdit.Wrap
-                    textFormat: TextEdit.PlainText
-                    selectByMouse: true
-                    placeholderText: qsTr("Type a translation, or add one from Translator.")
-                    Accessible.name: qsTr("Word translation (optional)")
-                    onTextChanged: form.edited()
+                    Layout.minimumWidth: 0
+                    spacing: 4
+                    Label {
+                        text: qsTr("Word translation (optional)")
+                        font.bold: true
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    TextArea {
+                        id: translation_input
+                        objectName: "word_translation"
+                        Layout.fillWidth: true
+                        font.pixelSize: 19
+                        wrapMode: TextEdit.Wrap
+                        textFormat: TextEdit.PlainText
+                        selectByMouse: true
+                        placeholderText: qsTr("Type a translation, or add one from Translator.")
+                        Accessible.name: qsTr("Word translation (optional)")
+                        onTextChanged: form.edited()
+                    }
                 }
                 NotebookButton {
                     objectName: "add_context_translation"
@@ -166,26 +186,31 @@ NotebookSurface {
                         context_translation_input.forceActiveFocus()
                     }
                 }
-                Label {
-                    visible: form.context_translation_expanded
-                    text: qsTr("Context translation (optional)")
-                    font.bold: true
-                    font.pixelSize: 12
-                    Layout.fillWidth: true
-                }
-                TextArea {
-                    id: context_translation_input
-                    objectName: "context_translation"
+                ColumnLayout {
                     visible: form.context_translation_expanded
                     Layout.fillWidth: true
-                    wrapMode: TextEdit.Wrap
-                    textFormat: TextEdit.PlainText
-                    selectByMouse: true
-                    placeholderText: qsTr("Type a context translation, or add one from Translator.")
-                    Accessible.name: qsTr("Context translation (optional)")
-                    onTextChanged: {
-                        if (text.length > 0) form.context_translation_expanded = true
-                        form.edited()
+                    Layout.minimumWidth: 0
+                    spacing: 4
+                    Label {
+                        text: qsTr("Context translation (optional)")
+                        font.bold: true
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    TextArea {
+                        id: context_translation_input
+                        objectName: "context_translation"
+                        Layout.fillWidth: true
+                        wrapMode: TextEdit.Wrap
+                        textFormat: TextEdit.PlainText
+                        selectByMouse: true
+                        placeholderText: qsTr("Type a context translation, or add one from Translator.")
+                        Accessible.name: qsTr("Context translation (optional)")
+                        onTextChanged: {
+                            if (text.length > 0) form.context_translation_expanded = true
+                            form.edited()
+                        }
                     }
                 }
                 NotebookButton {

@@ -176,6 +176,8 @@ ComboBox {
             background: null
             selectByMouse: true
             clip: true
+            Accessible.name: control.Accessible.name
+            Accessible.description: control.Accessible.description
             onTextEdited: control.start_search(text)
             onActiveFocusChanged: if (activeFocus) selectAll()
             Keys.priority: Keys.BeforeItem

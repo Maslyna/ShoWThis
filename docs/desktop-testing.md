@@ -21,6 +21,13 @@ dialog movement/resizing/focus, system palettes, explicit append/save and creden
 `LanguagePickerTest` covers typed filtering, arrows/Enter/Escape, regional codes,
 stable model indices and a virtualized long language list.
 
+UI regression coverage also includes the 460×360 notebook, visible translator
+actions during scrolling, preserved personal fields and confirmed sense
+replacement, compact OCR errors, keyboard OCR/context selection, named editable
+picker inputs, and explicit installed-dictionary activation.
+Layout checks also cover scrollable empty states and confirmations at 460×360,
+plus compact translator focus/actions with a larger desktop font and long card names.
+
 OCR uses a 15-second recognition deadline and cooperative shutdown cancellation.
 Cancellation is checked before recognition and by Tesseract's progress monitor.
 It is not a hard process kill: model initialization and external/native I/O do
@@ -41,6 +48,9 @@ compositor permissions, keyboard grabs, or display geometry.
    duplicates. Move the preview panel to select text underneath it. Apply and
    save, then reopen the card to verify its context. Cancel/Esc must preserve
    an unsaved draft; hiding or recapturing during selection must not apply it.
+   Repeat word/context selection using **Ctrl+L**, **Up/Down**, **Enter** or
+   **Space**. Confirm the focused word and checked state are announced by the
+   desktop screen reader. Escape closes the word list before cancelling context.
 3. Toggle rapidly during capture/OCR. Hide the overlay while work runs; it must
    stay hidden. Quit during recognition and verify cooperative shutdown.
 4. Deny shortcut permission. Confirm an actionable warning and working tray capture.
@@ -67,6 +77,13 @@ compositor permissions, keyboard grabs, or display geometry.
    context: both dialogs temporarily hide, then return without losing the standalone
    session. Open Anki export: the overlay must hide while the standard save dialog
    owns keyboard focus, then restore unless explicitly dismissed in the meantime.
+   At the notebook's minimum size, scroll to a meaning, edit it and save without
+   a clipped footer. Change lookup text and sources: personal fields must remain.
+   Choose another dictionary meaning: Cancel keeps the draft; Replace fields
+   changes only the named fields. In compact Translator, request/cancel and
+   add-to-card actions must remain visible while text scrolls.
+   Under Offline dictionaries, activate an installed pack with **Use for lookup**;
+   verify the matching languages and effective network policy in the dictionary.
 6. Remove/disable OCR language data in an isolated test environment. The notebook
    must still open and attempted OCR must report how to install/select data.
 7. Test a fresh user profile with QSQLITE and all required runtime plugins
