@@ -16,6 +16,7 @@ OverlayDialog {
     property bool updating_result: false
     property string feedback: ""
     property string configuration_error: ""
+    property bool result_ready: false
     readonly property var card_fields: [
         { name: qsTr("Word translation"), value: "translation" },
         { name: qsTr("Context translation"), value: "context_translation" },
@@ -27,6 +28,9 @@ OverlayDialog {
     SystemPalette { id: disabled_colors; colorGroup: SystemPalette.Disabled }
 
     function invalidate() {
+        copy_acknowledgment.stop()
+        result_tint.reset()
+        result_ready = false
         translator.clear_session()
         updating_result = true
         result.text = ""
@@ -56,6 +60,15 @@ OverlayDialog {
         feedback = overlay.add_to_selected_card(field, text, language)
             ? qsTr("Added to card draft. Save in the notebook to keep it.")
             : qsTr("Select a card in the notebook before adding text.")
+    }
+    onVisibleChanged: {
+        if (!visible) {
+            copy_acknowledgment.stop()
+        }
+    }
+    Timer {
+        id: copy_acknowledgment
+        interval: 1200
     }
     onClosed: {
         setup.close()
@@ -95,6 +108,10 @@ OverlayDialog {
             window.updating_result = true
             result.text = text
             window.updating_result = false
+            copy_acknowledgment.stop()
+            window.result_ready = true
+            if (overlay.motion_enabled && window.visible)
+                result_tint.acknowledge()
         }
     }
 
@@ -184,6 +201,7 @@ OverlayDialog {
                         NotebookLanguagePicker {
                             objectName: "translator_source_language"
                             options: learning.language_options
+                            motion_enabled: overlay.motion_enabled
                             language_code: overlay.translator_source_language
                             onLanguage_selected: function(code) { overlay.translator_source_language = code }
                             Layout.fillWidth: true
@@ -205,6 +223,7 @@ OverlayDialog {
                         NotebookLanguagePicker {
                             objectName: "translator_target_language"
                             options: learning.language_options
+                            motion_enabled: overlay.motion_enabled
                             language_code: overlay.translator_target_language
                             onLanguage_selected: function(code) { overlay.translator_target_language = code }
                             Layout.fillWidth: true
@@ -230,6 +249,7 @@ OverlayDialog {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.minimumWidth: 0
+                            Layout.preferredWidth: 1
                             Layout.minimumHeight: window.wide_layout ? 210 : 180
                             padding: 14
                             ColumnLayout {
@@ -268,15 +288,31 @@ OverlayDialog {
                             }
                         }
                         NotebookSurface {
+                            id: result_surface
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.minimumWidth: 0
+                            Layout.preferredWidth: 1
                             Layout.minimumHeight: window.wide_layout ? 210 : 180
                             padding: 14
+                            FeedbackTint {
+                                id: result_tint
+                                objectName: "translation_result_feedback"
+                                parent: result_surface.background
+                                anchors.fill: parent
+                                tint: colors.highlight
+                                motion_enabled: overlay.motion_enabled
+                                radius: 9
+                            }
                             ColumnLayout {
                                 anchors.fill: parent
                                 spacing: 8
-                                Label { text: qsTr("Translation"); font.pixelSize: 12; font.weight: Font.DemiBold }
+                                Label {
+                                    objectName: "translator_result_heading"
+                                    text: window.result_ready ? qsTr("Translation ready") : qsTr("Translation")
+                                    font.pixelSize: 12
+                                    font.weight: Font.DemiBold
+                                }
                                 ScrollView {
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
@@ -293,6 +329,9 @@ OverlayDialog {
                                         padding: 0
                                         Accessible.name: qsTr("Translation result")
                                         onTextChanged: {
+                                            copy_acknowledgment.stop()
+                                            window.result_ready = false
+                                            result_tint.reset()
                                             if (!window.updating_result && window.translator.session_busy)
                                                 window.translator.clear_session()
                                             window.feedback = ""
@@ -300,12 +339,20 @@ OverlayDialog {
                                     }
                                 }
                                 NotebookButton {
+                                    id: copy_button
                                     objectName: "translator_copy"
-                                    text: qsTr("Copy")
+                                    text: copy_acknowledgment.running ? qsTr("Copied") : qsTr("Copy")
+                                    implicitWidth: Math.max(38, copy_metrics.advanceWidth(qsTr("Copy")) + 28,
+                                                            copy_metrics.advanceWidth(qsTr("Copied")) + 28)
                                     quiet: true
+                                    motion_enabled: overlay.motion_enabled
+                                    FontMetrics { id: copy_metrics; font: copy_button.font }
                                     enabled: result.text.trim().length > 0
                                     Layout.alignment: Qt.AlignRight
-                                    onClicked: overlay.copy_text(result.text)
+                                    onClicked: {
+                                        overlay.copy_text(result.text)
+                                        copy_acknowledgment.restart()
+                                    }
                                 }
                             }
                         }

@@ -59,7 +59,7 @@ qt_add_library(showthis_ui STATIC
     src/AScreenCaptureBackend.h src/AScreenCaptureBackend.cpp
     ${SHOWTHIS_QML_RESOURCES}
 )
-target_link_libraries(showthis_ui PUBLIC showthis_core Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Concurrent Qt6::Widgets)
+target_link_libraries(showthis_ui PUBLIC showthis_core Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Concurrent Qt6::Widgets Qt6::DBus)
 
 qt_add_library(showthis_ocr STATIC src/OcrEngine.h src/OcrEngine.cpp)
 target_include_directories(showthis_ocr PUBLIC src)
@@ -108,6 +108,13 @@ if(BUILD_TESTING)
         qt_add_executable(DesktopIntegrationTest tests/DesktopIntegrationTest.cpp)
         target_link_libraries(DesktopIntegrationTest PRIVATE showthis_desktop Qt6::Test)
         add_test(NAME DesktopIntegrationTest COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:DesktopIntegrationTest>)
+        qt_add_executable(MotionPreferencesTest tests/MotionPreferencesTest.cpp)
+        target_link_libraries(MotionPreferencesTest PRIVATE showthis_desktop Qt6::Test)
+        add_test(NAME MotionPreferencesTest COMMAND ${DBUS_RUN_SESSION} -- ${CMAKE_COMMAND} -E env
+            SHOWTHIS_TEST_PRIVATE_DBUS=1 $<TARGET_FILE:MotionPreferencesTest>)
+        set_tests_properties(MotionPreferencesTest PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software"
+        )
     endif()
 
     qt_add_executable(OverlayTest tests/OverlayTest.cpp)

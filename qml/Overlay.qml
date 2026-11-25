@@ -28,7 +28,10 @@ Item {
     readonly property real scaleX: overlay.imageSize.width > 0 ? width / overlay.imageSize.width : 1
     readonly property real scaleY: overlay.imageSize.height > 0 ? height / overlay.imageSize.height : 1
     property string hoveredWord: ""
-    property rect hoveredRect: Qt.rect(0, 0, 0, 0)
+    property Item hovered_item: null
+    readonly property rect hoveredRect: hovered_item
+        ? Qt.rect(hovered_item.x, hovered_item.y, hovered_item.width, hovered_item.height)
+        : Qt.rect(0, 0, 0, 0)
     readonly property var selectedLanguages: overlay.selectedLanguage.length > 0
         ? overlay.selectedLanguage.split("+") : []
     readonly property bool context_selection_available: !overlay.scanning
@@ -128,6 +131,7 @@ Item {
     }
 
     function clearHover() {
+        // Keep the last live box while its exit highlight settles.
         hoveredWord = ""
     }
 
@@ -217,6 +221,29 @@ Item {
         color: "#20000000"
     }
 
+    Rectangle {
+        id: hover_feedback
+        objectName: "ocr_hover_feedback"
+        x: root.hoveredRect.x
+        y: root.hoveredRect.y
+        width: root.hoveredRect.width
+        height: root.hoveredRect.height
+        radius: 2
+        color: systemPalette.highlight
+        opacity: overlay.visible && root.hoveredWord.length > 0
+            && !context_selection.active && !root.dialogs_visible ? 0.25 : 0
+        Behavior on opacity {
+            enabled: overlay.motion_enabled && overlay.visible
+                && !context_selection.active && !root.dialogs_visible
+            onEnabledChanged: if (!enabled) hover_transition.complete()
+            NumberAnimation {
+                id: hover_transition
+                duration: 100
+                easing.type: Easing.OutCubic
+            }
+        }
+    }
+
     Repeater {
         model: overlay.words
 
@@ -229,7 +256,7 @@ Item {
             y: modelData.y * root.scaleY
             width: modelData.width * root.scaleX
             height: modelData.height * root.scaleY
-            color: hover.hovered && !context_selection.active && !root.dialogs_visible ? Qt.alpha(systemPalette.highlight, 0.25) : "transparent"
+            color: "transparent"
             border.color: Qt.alpha(systemPalette.highlight, hover.hovered ? 1 : 0.45)
             border.width: hover.hovered || highlightsButton.checked ? 1 : 0
             radius: 2
@@ -247,9 +274,9 @@ Item {
                 enabled: !context_selection.active && !root.dialogs_visible
                 onHoveredChanged: {
                     if (hovered) {
-                        root.hoveredRect = Qt.rect(wordBox.x, wordBox.y, wordBox.width, wordBox.height)
+                        root.hovered_item = wordBox
                         root.hoveredWord = wordBox.modelData.text
-                    } else if (root.hoveredWord === wordBox.modelData.text) {
+                    } else if (root.hovered_item === wordBox) {
                         root.clearHover()
                     }
                 }
@@ -609,6 +636,7 @@ Item {
     ContextSelection {
         id: context_selection
         z: 100000
+        motion_enabled: overlay.motion_enabled
         anchors.fill: parent
         words: overlay.words
         scale_x: root.scaleX

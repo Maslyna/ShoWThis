@@ -49,6 +49,7 @@ ColumnLayout {
             model: page.service.history_model
             ScrollBar.vertical: ScrollBar {}
             NotebookEmpty {
+                motion_enabled: overlay.motion_enabled
                 anchors.fill: parent
                 visible: list.count === 0
                 heading: search.text.length > 0 ? qsTr("No matching lookups") : qsTr("Your discoveries will appear here")

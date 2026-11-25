@@ -203,6 +203,7 @@ ColumnLayout {
                         }
                         NotebookLanguagePicker {
                             objectName: "lookup_language"
+                            motion_enabled: overlay.motion_enabled
                             options: editor.service.language_options
                             language_code: editor.service.source_language
                             compact: !editor.wide_layout

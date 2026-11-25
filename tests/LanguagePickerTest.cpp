@@ -153,6 +153,48 @@ private slots:
         QCOMPARE(editor(control)->property("text").toString(), QStringLiteral("English"));
     }
 
+    void committed_language_feedback_respects_motion_data()
+    {
+        QTest::addColumn<bool>("motion_enabled");
+        QTest::newRow("normal") << true;
+        QTest::newRow("reduced") << false;
+    }
+
+    void committed_language_feedback_respects_motion()
+    {
+        QFETCH(bool, motion_enabled);
+        QQuickView view;
+        QVERIFY(load(view, languages));
+        auto *control = picker(view);
+        QVERIFY(control);
+        control->setProperty("motion_enabled", motion_enabled);
+        auto *feedback = control->findChild<QQuickItem *>("language_feedback");
+        QVERIFY(feedback);
+        type(view, control, "Fre");
+        QTRY_COMPARE(results(control)->property("count").toInt(), 1);
+        QCOMPARE(control->property("language_code").toString(), QString("en"));
+        QCOMPARE(feedback->opacity(), 0.0);
+        QTest::keyClick(&view, Qt::Key_Return);
+        QTRY_COMPARE(control->property("language_code").toString(), QString("fr"));
+        QCOMPARE(editor(control)->property("text").toString(), QString("French"));
+        if (motion_enabled)
+            QTRY_VERIFY(feedback->opacity() > 0);
+        else
+            QCOMPARE(feedback->opacity(), 0.0);
+        control->setProperty("motion_enabled", false);
+        QCOMPARE(feedback->opacity(), 0.0);
+        control->setProperty("motion_enabled", true);
+        type(view, control, "Jap");
+        QTest::keyClick(&view, Qt::Key_Return);
+        QTRY_COMPARE(control->property("language_code").toString(), QString("ja"));
+        QTRY_VERIFY(feedback->opacity() > 0);
+        control->setVisible(false);
+        QCOMPARE(feedback->opacity(), 0.0);
+        control->setVisible(true);
+        QCOMPARE(feedback->opacity(), 0.0);
+        QCOMPARE(editor(control)->property("text").toString(), QString("Japanese"));
+    }
+
     void partial_language_name_commits_filtered_match()
     {
         QQuickView view;

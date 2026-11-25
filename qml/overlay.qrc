@@ -3,6 +3,7 @@
         <file>Overlay.qml</file>
         <file>ContextSelection.qml</file>
         <file>RecognizedWordPicker.qml</file>
+        <file>FeedbackTint.qml</file>
         <file>LearningPanel.qml</file>
         <file>OverlayDialog.qml</file>
         <file>NotebookDialog.qml</file>

@@ -117,6 +117,26 @@ the official hosted server requires a paid API key. Use HTTPS for remote
 servers; HTTP is unencrypted. Requests cannot follow redirects to another origin.
 DeepL remains available in the same provider picker.
 
+## Feedback and motion
+
+OCR hover, context selection, committed language changes and new translation
+results use brief 100–140 ms native Qt Quick feedback without moving controls or
+delaying content. Empty-state actions respond quietly to hover and focus.
+**Translation ready** marks a received result; **Copied** confirms an explicit
+copy for 1.2 seconds and clears when the text/session changes. Results remain
+editable, and additions still require an explicit Save.
+
+New effects follow the desktop's reduced-motion preference through the
+[Settings portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Settings.html).
+With reduced motion, feedback states change immediately without animated tints.
+If that preference is unavailable or malformed, new animations stay off.
+Preference changes also stop effects already in progress.
+
+Motion settings use a separate D-Bus peer so their reads cannot pre-empt shortcut
+app-ID registration. If an older build reported **An app id is required**, choose
+**Quit** in the tray and relaunch the updated app; retrying in the same process
+does not clear the portal's cached identity.
+
 ## Data and cache
 
 Saved vocabulary uses the displayed `vocabulary.json` path. Back it up. Lookup

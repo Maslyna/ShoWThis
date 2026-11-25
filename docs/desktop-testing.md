@@ -34,6 +34,14 @@ It is not a hard process kill: model initialization and external/native I/O do
 not support forcible cancellation. The controller waits for native work to stop
 before destroying its engine.
 
+`MotionPreferencesTest` runs on a private D-Bus session and verifies the native
+reduced-motion preference, live changes, malformed/missing values, stale replies
+and portal restarts. It also checks that disabling motion clears active feedback.
+Language and translator tests cover committed-versus-provisional selection,
+immediate editable results, exact clipboard contents, and resettable copy feedback.
+The identity regression fixture also checks settings-first and concurrent startup,
+then shortcut activation after portal restart, with per-peer identity caching.
+
 ## Manual KDE Wayland check (required before distribution)
 
 These steps require an actual logged-in KDE desktop; unit tests cannot verify
@@ -88,6 +96,14 @@ compositor permissions, keyboard grabs, or display geometry.
    must still open and attempted OCR must report how to install/select data.
 7. Test a fresh user profile with QSQLITE and all required runtime plugins
    installed. Do not rely on files in a developer build directory.
+8. With desktop motion enabled, hover/select OCR words and resize without moving
+   the pointer: highlight and word boxes must stay aligned, including repeated
+   identical words. Commit a language change, receive a translation and copy it.
+   Results must appear immediately and stay editable; **Copied** must match the
+   real desktop clipboard and clear after an edit or a short acknowledgment.
+   Toggle reduced motion while feedback is active: the tint must stop immediately
+   while selection, **Translation ready**, copy feedback and empty-state actions
+   remain usable. Repeat with keyboard navigation and the desktop screen reader.
 
 The protocol behavior follows the [GlobalShortcuts v2 interface](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.GlobalShortcuts.html).
 `ConfigureShortcuts` only opens settings; readiness follows a nonempty

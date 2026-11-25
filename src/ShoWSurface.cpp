@@ -1,6 +1,7 @@
 #include "ShoWSurface.h"
 #include "LearningService.h"
 #include "NotebookData.h"
+#include "ShoWThisConstants.h"
 
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -15,6 +16,11 @@
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QQuickItem>
+#include <QDBusConnection>
+#include <QDBusMessage>
+#include <QDBusPendingCallWatcher>
+#include <QDBusPendingReply>
+#include <QDBusServiceWatcher>
 
 static void init_overlay_resources() {
     static const bool initialized = []() {
@@ -25,6 +31,12 @@ static void init_overlay_resources() {
 }
 
 namespace showthis {
+
+namespace {
+const QString settings_interface = QStringLiteral("org.freedesktop.portal.Settings");
+const QString appearance_namespace = QStringLiteral("org.freedesktop.appearance");
+const QString reduced_motion_key = QStringLiteral("reduced-motion");
+}
 
 class ScreenshotProvider : public QQuickImageProvider {
 public:
@@ -48,7 +60,9 @@ private:
 };
 
 ShoWSurface::ShoWSurface(QWindow *parent, LearningService *learning)
-    : QQuickView(parent), m_provider(new ScreenshotProvider) {
+    : QQuickView(parent),
+      m_motion_bus(QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("showthis-motion-settings"))),
+      m_provider(new ScreenshotProvider) {
     init_overlay_resources();
     setResizeMode(QQuickView::SizeRootObjectToView);
     engine()->addImageProvider(QStringLiteral("screenshot"), m_provider);
@@ -71,6 +85,22 @@ ShoWSurface::ShoWSurface(QWindow *parent, LearningService *learning)
         if (!visible)
             cancel_context_selection();
     });
+    // Portal calls freeze a peer's app identity; do not pre-empt shortcut registration.
+    auto &bus = m_motion_bus;
+    if (bus.connect(DESKTOP_PORTAL_SERVICE, DESKTOP_PORTAL_PATH, settings_interface, "SettingChanged",
+            this, SLOT(on_motion_setting_changed(QString,QString,QDBusVariant)))) {
+        auto *watcher = new QDBusServiceWatcher(DESKTOP_PORTAL_SERVICE, bus,
+            QDBusServiceWatcher::WatchForOwnerChange, this);
+        connect(watcher, &QDBusServiceWatcher::serviceOwnerChanged, this,
+            [this](const QString &, const QString &, const QString &owner) {
+                apply_motion_preference({});
+                if (!owner.isEmpty())
+                    read_motion_preference();
+            });
+        bus.connect({}, "/org/freedesktop/DBus/Local", "org.freedesktop.DBus.Local", "Disconnected",
+            this, SLOT(on_motion_bus_disconnected()));
+        read_motion_preference();
+    }
 }
 
 ShoWSurface::~ShoWSurface() {
@@ -78,6 +108,46 @@ ShoWSurface::~ShoWSurface() {
         m_export_dialog->disconnect(this);
         delete m_export_dialog.data();
     }
+}
+
+void ShoWSurface::read_motion_preference() {
+    auto message = QDBusMessage::createMethodCall(DESKTOP_PORTAL_SERVICE, DESKTOP_PORTAL_PATH,
+        settings_interface, "Read");
+    message.setAutoStartService(false);
+    message << appearance_namespace << reduced_motion_key;
+    const auto generation = ++m_motion_generation;
+    auto *watcher = new QDBusPendingCallWatcher(m_motion_bus.asyncCall(message), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher, generation]() {
+        watcher->deleteLater();
+        // A newer setting or portal owner supersedes this snapshot.
+        if (generation != m_motion_generation)
+            return;
+        const QDBusPendingReply<QDBusVariant> reply = *watcher;
+        apply_motion_preference(reply.isError() || !m_motion_bus.isConnected()
+            ? QVariant{} : reply.value().variant());
+    });
+}
+
+void ShoWSurface::apply_motion_preference(QVariant value) {
+    ++m_motion_generation;
+    while (value.metaType() == QMetaType::fromType<QDBusVariant>())
+        value = value.value<QDBusVariant>().variant();
+    // Unknown uint values mean no preference in the portal specification.
+    const bool enabled = value.metaType() == QMetaType::fromType<uint>() && value.value<uint>() != 1;
+    if (m_motion_enabled == enabled)
+        return;
+    m_motion_enabled = enabled;
+    emit motion_preferences_changed();
+}
+
+void ShoWSurface::on_motion_setting_changed(const QString &name_space, const QString &key,
+                                           const QDBusVariant &value) {
+    if (name_space == appearance_namespace && key == reduced_motion_key)
+        apply_motion_preference(value.variant());
+}
+
+void ShoWSurface::on_motion_bus_disconnected() {
+    apply_motion_preference({});
 }
 
 void ShoWSurface::open_notebook_word(const QString &word, const QString &context) {

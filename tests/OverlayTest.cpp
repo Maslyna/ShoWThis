@@ -258,6 +258,45 @@ private slots:
         QCOMPARE(warnings.size(), 0);
     }
 
+    void hover_feedback_tracks_resized_word() {
+        QTemporaryDir directory;
+        TestNetwork network;
+        showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
+        showthis::ShoWSurface surface(nullptr, &service);
+        surface.resize(1000, 700);
+        QImage image(1000, 700, QImage::Format_RGB32);
+        image.fill(Qt::white);
+        const QRect box(100, 100, 400, 250);
+        const QRect duplicate_box(600, 100, 300, 250);
+        surface.set_image(image, {{"Haus", box}, {"Haus", duplicate_box}});
+        surface.show();
+        surface.requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(&surface));
+        QTest::mouseMove(&surface, box.center());
+        auto *feedback = find_item(surface.contentItem(), "ocr_hover_feedback");
+        auto *outline = find_item(surface.contentItem(), "word_outline_0");
+        QVERIFY(feedback && outline);
+        QTRY_COMPARE(surface.rootObject()->property("hoveredWord").toString(), QString("Haus"));
+        auto *duplicate_outline = find_item(surface.contentItem(), "word_outline_1");
+        QVERIFY(duplicate_outline);
+        QTest::mouseMove(&surface, duplicate_box.center());
+        QTRY_COMPARE(surface.rootObject()->property("hoveredWord").toString(), QString("Haus"));
+        QTRY_COMPARE(feedback->mapRectToScene(QRectF(QPointF(), feedback->size())),
+            duplicate_outline->mapRectToScene(QRectF(QPointF(), duplicate_outline->size())));
+        QTest::mouseMove(&surface, box.center());
+        QTRY_COMPARE(surface.rootObject()->property("hoveredWord").toString(), QString("Haus"));
+        QTRY_COMPARE(feedback->mapRectToScene(QRectF(QPointF(), feedback->size())),
+            outline->mapRectToScene(QRectF(QPointF(), outline->size())));
+        surface.resize(1200, 840);
+        QTRY_COMPARE(outline->width(), 480.0);
+        QCOMPARE(surface.rootObject()->property("hoveredWord").toString(), QString("Haus"));
+        QTRY_COMPARE(feedback->mapRectToScene(QRectF(QPointF(), feedback->size())),
+            outline->mapRectToScene(QRectF(QPointF(), outline->size())));
+        surface.set_words({});
+        QTRY_COMPARE(feedback->width(), 0.0);
+        QVERIFY(network.requests.isEmpty());
+    }
+
     void compact_capture_retains_actionable_error() {
         QTemporaryDir directory;
         TestNetwork network;

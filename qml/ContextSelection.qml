@@ -10,6 +10,7 @@ Item {
     required property var words
     required property real scale_x
     required property real scale_y
+    property bool motion_enabled: false
     property bool active: false
     visible: active
     onActiveChanged: if (!active) word_picker.close()
@@ -21,6 +22,7 @@ Item {
     property var word_groups: ({})
     property var selected_indices: ({})
     readonly property string preview_text: combined_text()
+    onPreview_textChanged: if (active) selection_feedback.acknowledge()
     property bool gesture_pressed: false
     property bool dragging: false
     property point press_point: Qt.point(0, 0)
@@ -363,6 +365,13 @@ Item {
                     color: system_palette.base
                     radius: 5
                     border.color: Qt.alpha(system_palette.windowText, 0.18)
+                    FeedbackTint {
+                        id: selection_feedback
+                        objectName: "context_selection_feedback"
+                        tint: system_palette.highlight
+                        motion_enabled: root.motion_enabled
+                        radius: 5
+                    }
                 }
                 TextArea {
                     objectName: "context_selection_preview"

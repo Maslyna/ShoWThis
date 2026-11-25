@@ -2,6 +2,8 @@
 #define SHOWSURFACE_H
 
 #include <QImage>
+#include <QDBusConnection>
+#include <QDBusVariant>
 #include <QQuickView>
 #include <QQuickItem>
 #include <QPointer>
@@ -34,6 +36,7 @@ class ShoWSurface : public QQuickView {
     Q_PROPERTY(QString selected_card_id READ selected_card_id NOTIFY selected_card_changed)
     Q_PROPERTY(QString translator_source_language READ translator_source_language WRITE set_translator_source_language NOTIFY translator_languages_changed)
     Q_PROPERTY(QString translator_target_language READ translator_target_language WRITE set_translator_target_language NOTIFY translator_languages_changed)
+    Q_PROPERTY(bool motion_enabled READ motion_enabled NOTIFY motion_preferences_changed)
 
 public:
     // An injected service remains owned by the caller and must outlive the view.
@@ -66,6 +69,7 @@ public:
     QString selected_card_id() const { return m_selected_card_id; }
     QString translator_source_language() const { return m_translator_source_language; }
     QString translator_target_language() const { return m_translator_target_language; }
+    bool motion_enabled() const { return m_motion_enabled; }
     void set_translator_source_language(const QString &language);
     void set_translator_target_language(const QString &language);
     Q_INVOKABLE void open_notebook_word(const QString &word, const QString &context);
@@ -91,8 +95,18 @@ signals:
     void export_dialog_changed();
     void selected_card_changed();
     void translator_languages_changed();
+    void motion_preferences_changed();
+
+private slots:
+    void on_motion_setting_changed(const QString &name_space, const QString &key, const QDBusVariant &value);
+    void on_motion_bus_disconnected();
 
 private:
+    void read_motion_preference();
+    void apply_motion_preference(QVariant value);
+    QDBusConnection m_motion_bus;
+    bool m_motion_enabled = false;
+    quint64 m_motion_generation = 0;
     ScreenshotProvider *m_provider;
     LearningService *m_learning = nullptr;
     QPointer<QFileDialog> m_export_dialog;

@@ -46,6 +46,7 @@ NotebookSurface {
         Label { text: qsTr("Word language"); font.pixelSize: 12; font.bold: true }
         NotebookLanguagePicker {
             objectName: "offline_dictionary_word_language"
+            motion_enabled: overlay.motion_enabled
             Accessible.name: qsTr("Offline dictionary word language")
             options: [{code: "", name: qsTr("All word languages")}].concat(Array.from(settings.service.language_options))
             language_code: settings.word_language

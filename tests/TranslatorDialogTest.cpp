@@ -143,12 +143,13 @@ private slots:
         QCOMPARE(QApplication::topLevelWindows().size(), top_level_count);
         auto *source = find_item(window, "translator_source_text");
         auto *result = find_item(window, "translator_result_text");
+        auto *result_heading = find_item(window, "translator_result_heading");
         auto *source_language = find_item(window, "translator_source_language");
         auto *target_language = find_item(window, "translator_target_language");
         auto *add = find_item(window, "translator_add_result");
         auto *add_source = find_item(window, "translator_add_source");
         auto *copy = find_item(window, "translator_copy");
-        QVERIFY(source && result && source_language && target_language && add && add_source && copy);
+        QVERIFY(source && result && result_heading && source_language && target_language && add && add_source && copy);
         QVERIFY(network.requests.isEmpty());
         enter_text(window, source, "hello");
         choose(window, source_language, "en");
@@ -172,22 +173,107 @@ private slots:
         QVERIFY(!payload.contains("context"));
         QCOMPARE(network.requests.last().url().toString(), QString("https://translator.invalid/test/translate"));
         network.last_reply->complete();
-        QTRY_COMPARE(result->property("text").toString(), QString("bonjour"));
+        QCOMPARE(result->property("text").toString(), QString("bonjour"));
+        QVERIFY(result->isVisible());
+        QCOMPARE(result->opacity(), 1.0);
+        QVERIFY(!result->property("readOnly").toBool());
+        QCOMPARE(result_heading->property("text").toString(), QString("Translation ready"));
         QCOMPARE(QApplication::clipboard()->text(), QString("clipboard sentinel"));
         QVERIFY(!add->isEnabled());
         click_item(window, copy);
         QCOMPARE(QApplication::clipboard()->text(), QString("bonjour"));
+        QCOMPARE(copy->property("text").toString(), QString("Copied"));
+        click_item(window, copy);
+        QCOMPARE(QApplication::clipboard()->text(), QString("bonjour"));
+        QCOMPARE(copy->property("text").toString(), QString("Copied"));
+        enter_text(window, result, "my revision");
+        QCOMPARE(result->property("text").toString(), QString("my revision"));
+        QCOMPARE(result_heading->property("text").toString(), QString("Translation"));
+        QCOMPARE(copy->property("text").toString(), QString("Copy"));
+        click_item(window, copy);
+        QCOMPARE(QApplication::clipboard()->text(), QString("my revision"));
+        QCOMPARE(copy->property("text").toString(), QString("Copied"));
         QTest::keyClick(&surface, Qt::Key_Escape);
         QTRY_VERIFY(!window->isVisible());
+        QCOMPARE(copy->property("text").toString(), QString("Copy"));
         surface.open_translator();
         QCOMPARE(surface.translator_dialog(), window);
         QTRY_VERIFY(window->isVisible());
         QCOMPARE(source->property("text").toString(), QString("hello"));
-        QCOMPARE(result->property("text").toString(), QString("bonjour"));
+        QCOMPARE(result->property("text").toString(), QString("my revision"));
+        QCOMPARE(copy->property("text").toString(), QString("Copy"));
         QCOMPARE(surface.translator_target_language(), QString("fr"));
         QCOMPARE(network.requests.size(), 1);
         QVERIFY(!surface.notebook_dialog()->isVisible());
         QCOMPARE(warnings.size(), 0);
+    }
+
+    void copy_feedback_clears_with_session_changes_data() {
+        QTest::addColumn<QString>("change");
+        QTest::newRow("source-edit") << QString("source");
+        QTest::newRow("language-change") << QString("language");
+        QTest::newRow("provider-change") << QString("provider");
+        QTest::newRow("new-session") << QString("session");
+    }
+
+    void copy_feedback_clears_with_session_changes() {
+        QFETCH(QString, change);
+        QTemporaryDir directory;
+        TestNetwork network;
+        network.automatic = false;
+        network.response = R"({"translatedText":"bonjour"})";
+        showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
+        configure(service);
+        showthis::ShoWSurface surface(nullptr, &service);
+        surface.open_translator("hello", "en", "notes");
+        auto *window = surface.translator_dialog();
+        QVERIFY(window);
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        auto *translate = find_item(window, "translator_translate");
+        auto *source = find_item(window, "translator_source_text");
+        auto *result = find_item(window, "translator_result_text");
+        auto *copy = find_item(window, "translator_copy");
+        QVERIFY(translate && source && result && copy);
+        click_item(window, translate);
+        QTRY_COMPARE(network.requests.size(), 1);
+        network.last_reply->complete();
+        QCOMPARE(result->property("text").toString(), QString("bonjour"));
+        click_item(window, copy);
+        QCOMPARE(copy->property("text").toString(), QString("Copied"));
+        QCOMPARE(QApplication::clipboard()->text(), QString("bonjour"));
+        if (change == "source")
+            enter_text(window, source, "new source");
+        else if (change == "language")
+            surface.set_translator_target_language(surface.translator_target_language() == "fr" ? "es" : "fr");
+        else if (change == "provider")
+            service.translator()->set_provider_id("");
+        else
+            surface.open_translator("new source", "de", "notes");
+        QCOMPARE(copy->property("text").toString(), QString("Copy"));
+        QCOMPARE(result->property("text").toString(), QString());
+        QCOMPARE(QApplication::clipboard()->text(), QString("bonjour"));
+        QCOMPARE(network.requests.size(), 1);
+    }
+
+    void copy_feedback_expires_without_changing_result() {
+        QTemporaryDir directory;
+        TestNetwork network;
+        showthis::LearningService service(nullptr, directory.filePath("words.json"), &network);
+        showthis::ShoWSurface surface(nullptr, &service);
+        surface.open_translator();
+        auto *window = surface.translator_dialog();
+        QVERIFY(window);
+        QVERIFY(QTest::qWaitForWindowExposed(&surface));
+        auto *result = find_item(window, "translator_result_text");
+        auto *copy = find_item(window, "translator_copy");
+        QVERIFY(result && copy);
+        enter_text(window, result, "  manual result  ");
+        click_item(window, copy);
+        QCOMPARE(copy->property("text").toString(), QString("Copied"));
+        QTRY_COMPARE(copy->property("text").toString(), QString("Copy"));
+        QCOMPARE(result->property("text").toString(), QString("  manual result  "));
+        QCOMPARE(QApplication::clipboard()->text(), QString("  manual result  "));
+        QVERIFY(network.requests.isEmpty());
     }
 
     void language_search_escape_does_not_close_translator() {

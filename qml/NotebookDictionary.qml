@@ -29,6 +29,7 @@ NotebookSurface {
             Layout.fillHeight: true
             Layout.minimumHeight: 128
             NotebookEmpty {
+                motion_enabled: overlay.motion_enabled
                 anchors.fill: parent
                 visible: !dictionary.service.dictionary_busy && senses.count === 0
                 heading: dictionary.lookup_attempted ? qsTr("No meaning found yet") : qsTr("What does it mean?")

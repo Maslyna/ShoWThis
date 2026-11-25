@@ -7,6 +7,7 @@ Item {
     property string heading
     property string description
     property string action_text
+    property bool motion_enabled: false
     signal action_requested()
 
     Flickable {
@@ -51,6 +52,7 @@ Item {
                 objectName: "empty_state_action"
                 visible: text.length > 0
                 text: empty_state.action_text
+                motion_enabled: empty_state.motion_enabled
                 Layout.alignment: Qt.AlignHCenter
                 onClicked: empty_state.action_requested()
                 onActiveFocusChanged: if (activeFocus)

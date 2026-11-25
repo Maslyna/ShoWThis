@@ -77,6 +77,7 @@ ColumnLayout {
             model: page.service.vocabulary_model
             ScrollBar.vertical: ScrollBar {}
             NotebookEmpty {
+                motion_enabled: overlay.motion_enabled
                 anchors.fill: parent
                 visible: list.count === 0
                 heading: page.service.vocabulary.length > 0 ? qsTr("No matching words") : qsTr("Start your collection")
