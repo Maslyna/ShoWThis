@@ -80,6 +80,8 @@ void OcrEngine::set_languages(const QString &languages) {
     const auto path = m_config.data_path.toLocal8Bit();
     if (api->Init(path.isEmpty() ? nullptr : path.constData(), languages.toUtf8().constData()) != 0)
         throw std::runtime_error("Could not initialize Tesseract for language: " + languages.toStdString());
+    // Screens contain separate labels and paragraphs, not one uniform text block.
+    api->SetPageSegMode(tesseract::PSM_AUTO);
     m_api = std::move(api);
     m_config.langs = languages;
 }

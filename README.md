@@ -39,6 +39,12 @@ has an assigned trigger. Launching a second instance opens the running notebook.
 On the capture overlay, **Choose word…** / **Ctrl+L** opens recognized words in
 reading order. Use **Up/Down**, then **Enter** to open a word; **Esc** cancels.
 
+OCR detects separate labels and paragraphs automatically, including text inside
+game menus; it does not treat the entire screen as one text block. For German
+screens, choose German (`deu`) for OCR. Add Russian (`rus`) or Ukrainian (`ukr`)
+only when those languages appear on screen; translation targets are independent.
+Decorative fonts and busy backgrounds can still produce recognition errors.
+
 ## Word workspace
 
 Context is editable directly under the word. The **Translate** buttons beside the

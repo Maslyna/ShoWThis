@@ -5,6 +5,7 @@
 #include <tesseract/baseapi.h>
 #include <stdexcept>
 #include <vector>
+#include <algorithm>
 
 #include "OcrEngine.h"
 
@@ -61,6 +62,40 @@ private slots:
         showthis::ocr::OcrEngine no_data({{}, empty.path()});
         QVERIFY(no_data.available_languages().isEmpty());
         QVERIFY_EXCEPTION_THROWN(no_data.set_languages(""), std::runtime_error);
+    }
+
+    void game_labels_data() {
+        QTest::addColumn<QString>("languages");
+        QTest::newRow("german") << QStringLiteral("deu");
+        QTest::newRow("german-russian-ukrainian") << QStringLiteral("deu+rus+ukr");
+    }
+
+    void game_labels() {
+        QFETCH(QString, languages);
+        showthis::ocr::OcrEngine engine;
+        const auto available = engine.available_languages();
+        for (const auto &language : languages.split('+')) {
+            if (!available.contains(language))
+                QSKIP(qPrintable("Missing Tesseract language pack: " + language));
+        }
+        engine.set_languages(languages);
+        // Cropped, grayscale panels from the reported game screenshot.
+        const QImage image(QFINDTESTDATA("fixtures/ocr-game-panels.png"));
+        QVERIFY(!image.isNull());
+        const auto words = engine.scan_image(image);
+        const QMap<QString, QRect> labels{
+            {"Scarlett", QRect(185, 115, 110, 50)},
+            {"Wildling", QRect(180, 245, 120, 50)},
+            {"Hexe", QRect(1460, 250, 80, 40)},
+        };
+        for (auto label = labels.cbegin(); label != labels.cend(); ++label) {
+            const auto word = std::find_if(words.cbegin(), words.cend(), [&](const auto &candidate) {
+                return candidate.text == label.key() && label.value().contains(candidate.rect.center());
+            });
+            QVERIFY2(word != words.cend(), qPrintable("Missing selectable word: " + label.key()));
+            QVERIFY(label.value().contains(word->rect));
+            QVERIFY(word->context.contains(label.key()));
+        }
     }
 
     void real_non_english_model_without_english_pack() {
